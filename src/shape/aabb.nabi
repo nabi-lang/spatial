@@ -1,0 +1,175 @@
+//! `Aabb<T>`: an axis-aligned bounding box.
+
+use pkg::{Mat4, Real, Vec3};
+use core::reflect::Inspect;
+
+/// The box of points between `min` and `max` on every axis. `Aabb`
+/// alone is `Aabb<f32>`. A box with `min > max` on some axis is empty.
+/// `#[repr(C)]`: `min` then `max`.
+///
+/// ```nabi
+/// use spatial::{Aabb, Vec3};
+///
+/// let b = Aabb::new(Vec3::ZERO, Vec3::ONE);
+/// assert(b.contains(Vec3::splat(0.5)) && !b.contains(Vec3::splat(2.0)));
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, Inspect)]
+#[cfg_attr(feature = "nabion", derive(Nabion))]
+pub struct Aabb<T = f32> {
+    pub min: Vec3<T>;
+    pub max: Vec3<T>;
+}
+
+impl<T: Real> Aabb<T> {
+    /// The box from `min` to `max`.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// assert(Aabb::new(Vec3::ZERO, Vec3::ONE).size() == Vec3::ONE);
+    /// ```
+    pub const fn new(min: Vec3<T>, max: Vec3<T>) -> Aabb<T> { Aabb { min: min, max: max } }
+
+    /// The box `center - half..center + half`.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// assert(Aabb::from_center_half_extents(Vec3::ZERO, Vec3::ONE).min == -Vec3::ONE);
+    /// ```
+    pub fn from_center_half_extents(center: Vec3<T>, half: Vec3<T>) -> Aabb<T> { Aabb { min: center - half, max: center + half } }
+
+    /// The smallest box around `points`, `none` for no points.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// let b = Aabb::from_points([Vec3::X, Vec3::Y, -Vec3::Z]) ?? panic("no points");
+    /// assert(b.min == Vec3::new(0.0, 0.0, -1.0) && b.max == Vec3::new(1.0, 1.0, 0.0));
+    /// ```
+    pub fn from_points(points: List<Vec3<T>>) -> Aabb<T> | none {
+        if points.len() == 0 {
+            return none;
+        }
+        let b = Aabb { min: points[0], max: points[0] };
+        for p in points {
+            b = b.extend(p);
+        }
+        b
+    }
+
+    /// The middle.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// assert(Aabb::new(Vec3::ZERO, Vec3::splat(2.0)).center() == Vec3::ONE);
+    /// ```
+    pub fn center(self) -> Vec3<T> { (self.min + self.max) * T::from_f64(0.5) }
+
+    /// `max - min`.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// assert(Aabb::new(Vec3::ZERO, Vec3::splat(2.0)).size() == Vec3::splat(2.0));
+    /// ```
+    pub fn size(self) -> Vec3<T> { self.max - self.min }
+
+    /// Half the size, center to face.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// assert(Aabb::new(Vec3::ZERO, Vec3::splat(2.0)).half_extents() == Vec3::ONE);
+    /// ```
+    pub fn half_extents(self) -> Vec3<T> { self.size() * T::from_f64(0.5) }
+
+    /// Whether `min <= max` fails on some axis.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// assert(Aabb::new(Vec3::ONE, Vec3::ZERO).is_empty());
+    /// ```
+    pub fn is_empty(self) -> bool { self.min.x > self.max.x || self.min.y > self.max.y || self.min.z > self.max.z }
+
+    /// Whether `p` is inside or on the boundary.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// assert(Aabb::new(Vec3::ZERO, Vec3::ONE).contains(Vec3::ONE));
+    /// ```
+    pub fn contains(self, p: Vec3<T>) -> bool {
+        p.x >= self.min.x && p.y >= self.min.y && p.z >= self.min.z && p.x <= self.max.x && p.y <= self.max.y && p.z <= self.max.z
+    }
+
+    /// Whether the boxes overlap; touching counts.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// let a = Aabb::new(Vec3::ZERO, Vec3::ONE);
+    /// assert(a.intersects(Aabb::new(Vec3::ONE, Vec3::splat(2.0))));
+    /// ```
+    pub fn intersects(self, o: Aabb<T>) -> bool {
+        self.min.x <= o.max.x && self.max.x >= o.min.x && self.min.y <= o.max.y && self.max.y >= o.min.y
+            && self.min.z <= o.max.z && self.max.z >= o.min.z
+    }
+
+    /// The smallest box around both.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// let u = Aabb::new(Vec3::ZERO, Vec3::ONE).union(Aabb::new(-Vec3::ONE, Vec3::ZERO));
+    /// assert(u == Aabb::new(-Vec3::ONE, Vec3::ONE));
+    /// ```
+    pub fn union(self, o: Aabb<T>) -> Aabb<T> { Aabb { min: self.min.min(o.min), max: self.max.max(o.max) } }
+
+    /// The smallest box around `self` and the point `p`.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// assert(Aabb::new(Vec3::ZERO, Vec3::ZERO).extend(Vec3::ONE).max == Vec3::ONE);
+    /// ```
+    pub fn extend(self, p: Vec3<T>) -> Aabb<T> { Aabb { min: self.min.min(p), max: self.max.max(p) } }
+
+    /// The point of the box nearest `p`; `p` itself when inside.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// assert(Aabb::new(Vec3::ZERO, Vec3::ONE).closest_point(Vec3::splat(3.0)) == Vec3::ONE);
+    /// ```
+    pub fn closest_point(self, p: Vec3<T>) -> Vec3<T> { p.clamp(self.min, self.max) }
+
+    /// The squared distance from `p` to the box, 0 inside.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Vec3};
+    ///
+    /// assert(Aabb::new(Vec3::ZERO, Vec3::ONE).distance_squared(Vec3::new(3.0, 0.5, 0.5)) == 4.0);
+    /// ```
+    pub fn distance_squared(self, p: Vec3<T>) -> T { self.closest_point(p).distance_squared(p) }
+
+    /// The box around this box transformed by the affine matrix `m`:
+    /// not tight for a rotation, but it contains every transformed corner.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Mat4, Vec3};
+    ///
+    /// let b = Aabb::new(Vec3::ZERO, Vec3::ONE).transform(Mat4::from_translation(Vec3::X));
+    /// assert(b == Aabb::new(Vec3::X, Vec3::new(2.0, 1.0, 1.0)));
+    /// ```
+    pub fn transform(self, m: Mat4<T>) -> Aabb<T> {
+        // Arvo: each column scales the extent on its own.
+        let c = m.transform_point(self.center());
+        let h = self.half_extents();
+        let e = m.x_axis.xyz().abs() * h.x + m.y_axis.xyz().abs() * h.y + m.z_axis.xyz().abs() * h.z;
+        Aabb { min: c - e, max: c + e }
+    }
+}

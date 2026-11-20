@@ -1,0 +1,40 @@
+//! Element types: `Scalar` is what a vector holds (`f32`, `f64`, `i32`,
+//! `u32`), `Real` the two float types that lengths, rotations and
+//! matrices need.
+
+use core::num::{FloatingPoint, Num};
+use core::simd::SimdElement;
+
+/// A component type: `f32`, `f64`, `i32` or `u32`. The arithmetic of
+/// `IVec3` and `UVec3` is the integer type's, so `u32` components that
+/// go below zero panic as `u32` subtraction does.
+///
+/// ```nabi
+/// use spatial::{IVec2, Scalar, Vec2};
+///
+/// fn area<T: Scalar>(size: Vec2<T>) -> T { size.x * size.y }
+///
+/// assert(area(IVec2::new(3, 4)) == 12);
+/// assert(area(Vec2::new(1.5, 2.0)) == 3.0);
+/// ```
+pub trait Scalar: Num + SimdElement + Debug + Display {}
+
+/// A float component type, `f32` or `f64`: what lengths, normals,
+/// rotations, matrices and shapes take.
+///
+/// ```nabi
+/// use spatial::{DVec3, Real, Vec3, vec3};
+///
+/// fn unit<T: Real>(v: Vec3<T>) -> Vec3<T> { v.normalize() }
+///
+/// assert(unit(vec3(0.0, 0.0, 2.0)) == Vec3::Z);
+/// assert(unit(DVec3::new(0.0, 3.0, 0.0)) == DVec3::Y);
+/// ```
+pub trait Real: Scalar + FloatingPoint {}
+
+impl Scalar for f32 {}
+impl Scalar for f64 {}
+impl Scalar for i32 {}
+impl Scalar for u32 {}
+impl Real for f32 {}
+impl Real for f64 {}

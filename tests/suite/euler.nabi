@@ -1,0 +1,52 @@
+// Euler angles in all six orders.
+
+use pkg::tests::suite::{close, expect, rng};
+use pkg::{DMat3, DQuat, EulerOrder};
+use std::random::Rng;
+
+const ORDERS: [EulerOrder; 6] = [EulerOrder::XYZ, EulerOrder::XZY, EulerOrder::YXZ, EulerOrder::YZX, EulerOrder::ZXY, EulerOrder::ZYX];
+
+fn axis(i: usize, a: f64) -> DMat3 {
+    match i {
+        0 => DMat3::from_rotation_x(a),
+        1 => DMat3::from_rotation_y(a),
+        _ => DMat3::from_rotation_z(a),
+    }
+}
+
+#[test]
+fn documented_order() {
+    for order in ORDERS {
+        let (i, j, k) = order.axes();
+        let want = axis(i, 0.3) * axis(j, -0.7) * axis(k, 1.1);
+        expect(DMat3::from_euler(order, 0.3, -0.7, 1.1).approx_eq(want, 1e-12), f"{order:?} matrix");
+        expect(DMat3::from_quat(DQuat::from_euler(order, 0.3, -0.7, 1.1)).approx_eq(want, 1e-12), f"{order:?} quat");
+    }
+}
+
+#[test]
+fn round_trips() {
+    let g = rng(7);
+    for order in ORDERS {
+        for _ in 0..200 {
+            let (a, b, c) = (g.uniform(-3.1, 3.1), g.uniform(-1.5, 1.5), g.uniform(-3.1, 3.1));
+            let q = DQuat::from_euler(order, a, b, c);
+            let (a2, b2, c2) = q.to_euler(order);
+            close(a2, a, 1e-9, f"{order:?} a");
+            close(b2, b, 1e-9, f"{order:?} b");
+            close(c2, c, 1e-9, f"{order:?} c");
+        }
+    }
+}
+
+#[test]
+fn gimbal_lock() {
+    for order in ORDERS {
+        for b in [f64::PI / 2.0, -f64::PI / 2.0] {
+            let q = DQuat::from_euler(order, 0.4, b, 0.25);
+            let (a2, b2, c2) = q.to_euler(order);
+            close(c2, 0.0, 0.0, "c is zero at the lock");
+            expect(DQuat::from_euler(order, a2, b2, c2).angle_between(q) < 1e-6, f"{order:?} same rotation at b = {b}");
+        }
+    }
+}

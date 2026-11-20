@@ -1,0 +1,16 @@
+// NABION round trips (feature `nabion`).
+
+use pkg::tests::suite::expect;
+use pkg::{EulerOrder, Mat4, Quat, Transform, Vec3, vec3};
+use std::nabion;
+
+#[test]
+fn round_trips() {
+    let t = Transform::new(vec3(1.0, 2.0, 3.0), Quat::from_rotation_y(0.5f32), Vec3::ONE);
+    let text = try! nabion::to_str(t);
+    expect(try! nabion::from_str::<Transform>(text) == t, f"transform: {text}");
+    let m: Mat4 = Mat4::perspective_rh(1.0, 1.5, 0.1, 10.0);
+    expect(try! nabion::from_str::<Mat4>(try! nabion::to_str(m)) == m, "mat4");
+    expect(try! nabion::from_str::<EulerOrder>(try! nabion::to_str(EulerOrder::ZYX)) == EulerOrder::ZYX, "enum");
+    expect(try! nabion::to_str_flat(vec3(1.0, 2.0, 3.0)) == "Vec3 { x: 1.0, y: 2.0, z: 3.0 }", try! nabion::to_str_flat(vec3(1.0, 2.0, 3.0)));
+}

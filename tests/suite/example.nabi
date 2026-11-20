@@ -1,0 +1,39 @@
+// The README's game loop, kept compiling and checked.
+
+use pkg::tests::suite::expect;
+use pkg::{Aabb, Mat4, Quat, Ray, Transform, Vec3};
+
+struct Ship {
+    body: Transform;
+    velocity: Vec3;
+    spin: f32;
+}
+
+fn step(ref ship: Ship, dt: f32) {
+    ship.body.translation += ship.velocity * dt;
+    ship.body.rotation = (Quat::from_rotation_y(ship.spin * dt) * ship.body.rotation).normalize();
+}
+
+#[test]
+fn game_loop() {
+    let ship = Ship { body: Transform::from_translation(Vec3::new(0.0, 0.0, -10.0)), velocity: Vec3::new(0.0, 0.0, 2.0), spin: 1.0 };
+    let camera = Mat4::look_at_rh(Vec3::new(0.0, 2.0, 5.0), Vec3::ZERO, Vec3::Y);
+    let projection = Mat4::perspective_rh(60.0f32.to_radians(), 16.0 / 9.0, 0.1, 100.0);
+    let view_proj = projection * camera;
+    let hull = Aabb::new(Vec3::splat(-1.0), Vec3::ONE);
+
+    let dt = 1.0f32 / 60.0;
+    for _ in 0..120 {
+        step(ref ship, dt);
+        let model = ship.body.to_mat4();
+        let mvp = view_proj * model; // upload mvp.to_cols_array() as a uniform
+        let ndc = mvp.project_point(Vec3::ZERO);
+        expect(ndc.z >= 0.0 && ndc.z <= 1.0, "in the depth range");
+    }
+    expect(ship.body.translation.approx_eq(Vec3::new(0.0, 0.0, -6.0), 1e-4), "moved 2 units/s for 2 s");
+
+    // Pick: a ray from the camera through the screen centre hits the hull.
+    let world = hull.transform(ship.body.to_mat4());
+    let ray = Ray::new(Vec3::new(0.0, 0.0, 5.0), -Vec3::Z);
+    expect(ray.intersect_aabb(world) != none, "picked");
+}

@@ -1,0 +1,149 @@
+//! `Mat4` products (on SIMD lanes) and `Vec4` dots (`Simd` lanes and a
+//! reduce, against the plain sum `Vec4::dot` uses) against the same
+//! arithmetic written out on scalars, in `f32` and `f64`. 4096 values
+//! per iteration, chained so no product can be skipped.
+
+use pkg::{DMat4, DQuat, DVec3, DVec4, Mat4, Quat, Real, Vec3, Vec4, vec4};
+use core::bench::Bench;
+use core::hint::black_box;
+use core::ops::Mul;
+
+const N: usize = 4096;
+
+fn mats() -> List<DMat4> {
+    List::from_fn(N, |i| {
+        let t = i as f64 * 0.001;
+        DMat4::from_scale_rotation_translation(DVec3::splat(1.0 + t * 1e-3), DQuat::from_rotation_y(t), DVec3::new(t, 1.0, -t))
+    })
+}
+
+fn vecs() -> List<DVec4> {
+    List::from_fn(N, |i| { let t = i as f64; DVec4::new(t, 1.0 - t, 0.5, t * 0.25) })
+}
+
+fn narrow_vec(v: DVec4) -> Vec4 { Vec4::new(v.x as f32, v.y as f32, v.z as f32, v.w as f32) }
+
+fn narrow_mat(m: DMat4) -> Mat4 {
+    Mat4::from_cols(narrow_vec(m.x_axis), narrow_vec(m.y_axis), narrow_vec(m.z_axis), narrow_vec(m.w_axis))
+}
+
+// The column-major product, one scalar at a time.
+fn scalar_col<T: Real>(a: pkg::Mat4<T>, c: pkg::Vec4<T>) -> pkg::Vec4<T> {
+    let (x, y, z, w) = (a.x_axis, a.y_axis, a.z_axis, a.w_axis);
+    pkg::Vec4 {
+        x: x.x * c.x + y.x * c.y + z.x * c.z + w.x * c.w,
+        y: x.y * c.x + y.y * c.y + z.y * c.z + w.y * c.w,
+        z: x.z * c.x + y.z * c.y + z.z * c.z + w.z * c.w,
+        w: x.w * c.x + y.w * c.y + z.w * c.z + w.w * c.w,
+    }
+}
+
+fn scalar_mul<T: Real>(a: pkg::Mat4<T>, b: pkg::Mat4<T>) -> pkg::Mat4<T> {
+    pkg::Mat4 { x_axis: scalar_col(a, b.x_axis), y_axis: scalar_col(a, b.y_axis), z_axis: scalar_col(a, b.z_axis), w_axis: scalar_col(a, b.w_axis) }
+}
+
+fn scalar_dot<T: Real>(a: pkg::Vec4<T>, b: pkg::Vec4<T>) -> T { a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w }
+
+#[bench]
+fn mat4_mul_simd_f32(b: Bench) {
+    let ms = mats().map(narrow_mat);
+    b.set_items(N as i64);
+    b.iter(|| {
+        let acc = Mat4::IDENTITY;
+        for m in black_box(ms) { acc = acc * m; }
+        acc
+    });
+}
+
+#[bench]
+fn mat4_mul_scalar_f32(b: Bench) {
+    let ms = mats().map(narrow_mat);
+    b.set_items(N as i64);
+    b.iter(|| {
+        let acc = Mat4::IDENTITY;
+        for m in black_box(ms) { acc = scalar_mul(acc, m); }
+        acc
+    });
+}
+
+#[bench]
+fn mat4_mul_simd_f64(b: Bench) {
+    let ms = mats();
+    b.set_items(N as i64);
+    b.iter(|| {
+        let acc = DMat4::IDENTITY;
+        for m in black_box(ms) { acc = acc * m; }
+        acc
+    });
+}
+
+#[bench]
+fn mat4_mul_scalar_f64(b: Bench) {
+    let ms = mats();
+    b.set_items(N as i64);
+    b.iter(|| {
+        let acc = DMat4::IDENTITY;
+        for m in black_box(ms) { acc = scalar_mul(acc, m); }
+        acc
+    });
+}
+
+#[bench]
+fn vec4_dot_simd_f32(b: Bench) {
+    let vs = vecs().map(narrow_vec);
+    b.set_items(N as i64);
+    b.iter(|| {
+        let acc = 0.0f32;
+        let q = vec4(0.5, 0.25, 0.125, 1.0);
+        for v in black_box(vs) { acc = acc + (v.simd() * q.simd()).reduce_sum(); }
+        acc
+    });
+}
+
+#[bench]
+fn vec4_dot_scalar_f32(b: Bench) {
+    let vs = vecs().map(narrow_vec);
+    b.set_items(N as i64);
+    b.iter(|| {
+        let acc = 0.0f32;
+        let q = vec4(0.5, 0.25, 0.125, 1.0);
+        for v in black_box(vs) { acc = acc + scalar_dot(v, q); }
+        acc
+    });
+}
+
+#[bench]
+fn vec4_dot_simd_f64(b: Bench) {
+    let vs = vecs();
+    b.set_items(N as i64);
+    b.iter(|| {
+        let acc = 0.0;
+        let q = DVec4::new(0.5, 0.25, 0.125, 1.0);
+        for v in black_box(vs) { acc = acc + (v.simd() * q.simd()).reduce_sum(); }
+        acc
+    });
+}
+
+#[bench]
+fn vec4_dot_scalar_f64(b: Bench) {
+    let vs = vecs();
+    b.set_items(N as i64);
+    b.iter(|| {
+        let acc = 0.0;
+        let q = DVec4::new(0.5, 0.25, 0.125, 1.0);
+        for v in black_box(vs) { acc = acc + scalar_dot(v, q); }
+        acc
+    });
+}
+
+#[bench]
+fn quat_rotate_f32(b: Bench) {
+    let q = Quat::from_rotation_y(0.3);
+    let vs = vecs().map(|v: DVec4| -> Vec3 { narrow_vec(v).xyz() });
+    b.set_items(N as i64);
+    b.iter(|| {
+        let acc = Vec3::ZERO;
+        for v in black_box(vs) { acc = acc + q * v; }
+        acc
+    });
+}

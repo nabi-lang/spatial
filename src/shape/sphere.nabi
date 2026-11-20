@@ -1,0 +1,72 @@
+//! `Sphere<T>`: a ball, for bounds and quick overlap tests.
+
+use pkg::{Aabb, Real, Vec3};
+use core::reflect::Inspect;
+
+/// The points within `radius` of `center`. `#[repr(C)]`: `center` then
+/// `radius`, the `vec4` a shader's bounding sphere often is.
+///
+/// ```nabi
+/// use spatial::{Sphere, Vec3};
+///
+/// let s = Sphere::new(Vec3::ZERO, 2.0);
+/// assert(s.contains(Vec3::ONE) && !s.contains(Vec3::splat(2.0)));
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, Inspect)]
+#[cfg_attr(feature = "nabion", derive(Nabion))]
+pub struct Sphere<T = f32> {
+    pub center: Vec3<T>;
+    pub radius: T;
+}
+
+impl<T: Real> Sphere<T> {
+    /// The sphere around `center`.
+    ///
+    /// ```nabi
+    /// use spatial::{Sphere, Vec3};
+    ///
+    /// assert(Sphere::new(Vec3::ZERO, 1.0).radius == 1.0);
+    /// ```
+    pub const fn new(center: Vec3<T>, radius: T) -> Sphere<T> { Sphere { center: center, radius: radius } }
+
+    /// Whether `p` is inside or on the surface.
+    ///
+    /// ```nabi
+    /// use spatial::{Sphere, Vec3};
+    ///
+    /// assert(Sphere::new(Vec3::ZERO, 1.0).contains(Vec3::X));
+    /// ```
+    pub fn contains(self, p: Vec3<T>) -> bool { self.center.distance_squared(p) <= self.radius * self.radius }
+
+    /// Whether the spheres overlap; touching counts.
+    ///
+    /// ```nabi
+    /// use spatial::{Sphere, Vec3};
+    ///
+    /// assert(Sphere::new(Vec3::ZERO, 1.0).intersects(Sphere::new(Vec3::new(2.0, 0.0, 0.0), 1.0)));
+    /// ```
+    pub fn intersects(self, o: Sphere<T>) -> bool {
+        let r = self.radius + o.radius;
+        self.center.distance_squared(o.center) <= r * r
+    }
+
+    /// Whether the sphere and the box overlap.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Sphere, Vec3};
+    ///
+    /// let b = Aabb::new(Vec3::ZERO, Vec3::ONE);
+    /// assert(Sphere::new(Vec3::new(2.0, 0.5, 0.5), 1.0).intersects_aabb(b));
+    /// ```
+    pub fn intersects_aabb(self, b: Aabb<T>) -> bool { b.distance_squared(self.center) <= self.radius * self.radius }
+
+    /// The box around the sphere.
+    ///
+    /// ```nabi
+    /// use spatial::{Aabb, Sphere, Vec3};
+    ///
+    /// assert(Sphere::new(Vec3::ZERO, 1.0).aabb() == Aabb::new(-Vec3::ONE, Vec3::ONE));
+    /// ```
+    pub fn aabb(self) -> Aabb<T> { Aabb::from_center_half_extents(self.center, Vec3::splat(self.radius)) }
+}

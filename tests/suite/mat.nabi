@@ -1,0 +1,133 @@
+// Matrices on known values: products, inverses, views, projections.
+
+use pkg::tests::suite::{close, expect};
+use pkg::{DMat2, DMat3, DMat4, DQuat, DVec2, DVec3, DVec4, Mat4, vec3, vec4};
+
+fn sample() -> DMat4 {
+    DMat4::from_cols_array([2.0, 0.0, 1.0, 0.0, 1.0, 3.0, 0.0, 1.0, 0.0, 1.0, 4.0, 2.0, 1.0, 0.0, 0.0, 1.0])
+}
+
+// The plain triple loop, row r col c = sum a[r][k] b[k][c].
+fn naive(a: DMat4, b: DMat4) -> DMat4 {
+    let out = [0.0; 16];
+    for c in 0..4usize {
+        for r in 0..4usize {
+            let s = 0.0;
+            for k in 0..4usize { s = s + a.col(k)[r] * b.col(c)[k]; }
+            out[c * 4 + r] = s;
+        }
+    }
+    DMat4::from_cols_array(out)
+}
+
+#[test]
+fn products() {
+    let a = sample();
+    let b = DMat4::from_scale_rotation_translation(DVec3::new(1.0, 2.0, 3.0), DQuat::from_rotation_y(0.4), DVec3::ONE);
+    expect((a * b).approx_eq(naive(a, b), 1e-12), "mat4 product");
+    expect(a * DVec4::new(1.0, 0.0, 0.0, 0.0) == a.x_axis, "mat4 * vec4");
+    expect(a * DMat4::IDENTITY == a && DMat4::IDENTITY * a == a, "identity");
+    let m3 = DMat3::from_rotation_x(0.3) * DMat3::from_rotation_y(0.2);
+    expect((m3 * DVec3::Z).approx_eq(DMat3::from_rotation_x(0.3) * (DMat3::from_rotation_y(0.2) * DVec3::Z), 1e-12), "mat3 order");
+    expect((DMat2::from_angle(0.5) * DMat2::from_angle(0.25)).approx_eq(DMat2::from_angle(0.75), 1e-12), "mat2 angles add");
+    expect(a + a == a * 2.0 && (a - a) == DMat4::ZERO, "add, sub, scale");
+}
+
+#[test]
+fn determinants_and_inverses() {
+    let a = sample();
+    close(a.determinant(), naive_det(a), 1e-12, "det4");
+    expect((a * a.inverse()).approx_eq(DMat4::IDENTITY, 1e-12), "inverse4");
+    expect(a.transpose().transpose() == a, "transpose4");
+    close(a.transpose().determinant(), a.determinant(), 1e-12, "det of transpose");
+    let m3 = DMat3::from_cols(DVec3::new(1.0, 2.0, 0.0), DVec3::new(0.0, 1.0, 4.0), DVec3::new(5.0, 6.0, 0.0));
+    close(m3.determinant(), 16.0, 1e-12, "det3");
+    expect((m3 * m3.inverse()).approx_eq(DMat3::IDENTITY, 1e-12), "inverse3");
+    let m2 = DMat2::from_cols(DVec2::new(4.0, 2.0), DVec2::new(7.0, 6.0));
+    close(m2.determinant(), 10.0, 1e-12, "det2");
+    expect((m2.inverse() * m2).approx_eq(DMat2::IDENTITY, 1e-12), "inverse2");
+    expect(DMat4::ZERO.try_inverse() == none && DMat3::ZERO.try_inverse() == none && DMat2::ZERO.try_inverse() == none, "singular");
+    expect(a.try_inverse() != none, "regular");
+}
+
+// Laplace expansion along the first row.
+fn naive_det(m: DMat4) -> f64 {
+    let d = 0.0;
+    for j in 0..4usize {
+        let cols: List<DVec3> = [];
+        for c in 0..4usize {
+            if c != j { cols.push(DVec3::new(m.col(c)[1], m.col(c)[2], m.col(c)[3])); }
+        }
+        let minor = DMat3::from_cols(cols[0], cols[1], cols[2]).determinant();
+        let sign = if j % 2 == 0 { 1.0 } else { -1.0 };
+        d = d + sign * m.col(j)[0] * minor;
+    }
+    d
+}
+
+#[test]
+fn transforms() {
+    let m = DMat4::from_translation(DVec3::new(1.0, 2.0, 3.0)) * DMat4::from_scale(DVec3::splat(2.0));
+    expect(m.transform_point(DVec3::ONE) == DVec3::new(3.0, 4.0, 5.0), "point");
+    expect(m.transform_vector(DVec3::ONE) == DVec3::splat(2.0), "vector");
+    let (s, r, t) = DMat4::from_scale_rotation_translation(DVec3::new(2.0, 3.0, 4.0), DQuat::from_rotation_z(0.7), DVec3::X).to_scale_rotation_translation();
+    expect(s.approx_eq(DVec3::new(2.0, 3.0, 4.0), 1e-12) && r.approx_eq(DQuat::from_rotation_z(0.7), 1e-12) && t == DVec3::X, "decompose");
+    let mirror = DMat4::from_scale(DVec3::new(-1.0, 1.0, 1.0));
+    let (s, r, t) = mirror.to_scale_rotation_translation();
+    expect(DMat4::from_scale_rotation_translation(s, r, t).approx_eq(mirror, 1e-12), "decompose mirror");
+    expect(DMat3::from_mat4(DMat4::from_mat3(DMat3::from_rotation_x(1.0))) == DMat3::from_rotation_x(1.0), "mat3 <-> mat4");
+    expect(DMat3::from_translation(DVec2::ONE).transform_point2(DVec2::ZERO) == DVec2::ONE, "2d translation");
+    expect(DMat3::from_translation(DVec2::ONE).transform_vector2(DVec2::X) == DVec2::X, "2d vector");
+}
+
+#[test]
+fn look_at() {
+    let eye = DVec3::new(3.0, 4.0, 5.0);
+    let target = DVec3::new(-1.0, 0.0, 2.0);
+    let v = DMat4::look_at_rh(eye, target, DVec3::Y);
+    expect(v.transform_point(eye).approx_eq(DVec3::ZERO, 1e-12), "rh: eye to origin");
+    let ahead = v.transform_point(target);
+    expect(ahead.x.abs() < 1e-12 && ahead.y.abs() < 1e-12 && ahead.z < 0.0, "rh: target on -z");
+    let l = DMat4::look_at_lh(eye, target, DVec3::Y);
+    let ahead = l.transform_point(target);
+    expect(ahead.x.abs() < 1e-12 && ahead.y.abs() < 1e-12 && ahead.z > 0.0, "lh: target on +z");
+    let up = v.transform_vector(DVec3::Y);
+    expect(up.y > 0.0, "rh: up stays up");
+}
+
+#[test]
+fn projections() {
+    let (n, f) = (0.5, 50.0);
+    // (matrix, view-space z of near and far, depth at near and far)
+    let cases = [
+        (DMat4::perspective_rh(1.2, 1.5, n, f), -1.0, 0.0),
+        (DMat4::perspective_lh(1.2, 1.5, n, f), 1.0, 0.0),
+        (DMat4::perspective_rh_gl(1.2, 1.5, n, f), -1.0, -1.0),
+        (DMat4::perspective_lh_gl(1.2, 1.5, n, f), 1.0, -1.0),
+        (DMat4::orthographic_rh(-3.0, 3.0, -2.0, 2.0, n, f), -1.0, 0.0),
+        (DMat4::orthographic_lh(-3.0, 3.0, -2.0, 2.0, n, f), 1.0, 0.0),
+        (DMat4::orthographic_rh_gl(-3.0, 3.0, -2.0, 2.0, n, f), -1.0, -1.0),
+        (DMat4::orthographic_lh_gl(-3.0, 3.0, -2.0, 2.0, n, f), 1.0, -1.0),
+    ];
+    for (p, dir, lo) in cases {
+        close(p.project_point(DVec3::new(0.0, 0.0, dir * n)).z, lo, 1e-12, "near depth");
+        close(p.project_point(DVec3::new(0.0, 0.0, dir * f)).z, 1.0, 1e-12, "far depth");
+        let mid = p.project_point(DVec3::new(0.0, 0.0, dir * 5.0)).z;
+        expect(mid > lo && mid < 1.0, "between near and far");
+    }
+    // The frustum's top edge at the near plane maps to y = 1.
+    let p = DMat4::perspective_rh(1.2, 1.5, n, f);
+    let top = n * (0.6f64).tan();
+    close(p.project_point(DVec3::new(0.0, top, -n)).y, 1.0, 1e-12, "fov");
+    close(p.project_point(DVec3::new(top * 1.5, 0.0, -n)).x, 1.0, 1e-12, "aspect");
+    let o = DMat4::orthographic_rh(-3.0, 3.0, -2.0, 2.0, n, f);
+    expect(o.transform_point(DVec3::new(3.0, -2.0, -n)).approx_eq(DVec3::new(1.0, -1.0, 0.0), 1e-12), "ortho corner");
+}
+
+#[test]
+fn single_precision() {
+    let m = Mat4::from_translation(vec3(1.0, 2.0, 3.0));
+    expect(m * vec4(0.0, 0.0, 0.0, 1.0) == vec4(1.0, 2.0, 3.0, 1.0), "f32 mat4 * vec4");
+    expect((m * m.inverse()).approx_eq(Mat4::<f32>::IDENTITY, 1e-6), "f32 inverse");
+    expect(m.to_cols_array()[12] == 1.0 && Mat4::from_cols_array(m.to_cols_array()) == m, "cols array");
+}

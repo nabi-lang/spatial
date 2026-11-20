@@ -1,0 +1,150 @@
+// Vector operations on known values, for every element type.
+
+use pkg::tests::suite::{close, expect};
+use pkg::{DVec2, DVec3, DVec4, IVec2, IVec3, Mat4, UVec2, UVec4, Vec2, Vec3, Vec4};
+
+#[test]
+fn arithmetic() {
+    let a = Vec3::new(1.0, 2.0, 3.0);
+    let b = Vec3::new(4.0, 5.0, 6.0);
+    expect(a + b == Vec3::new(5.0, 7.0, 9.0), "add");
+    expect(b - a == Vec3::splat(3.0), "sub");
+    expect(a * b == Vec3::new(4.0, 10.0, 18.0), "mul");
+    expect(b / a == Vec3::new(4.0, 2.5, 2.0), "div");
+    expect(a * 2.0 == 2.0 * a, "scalar both sides");
+    expect(a / 2.0 == Vec3::new(0.5, 1.0, 1.5), "scalar div");
+    expect(-a == Vec3::new(-1.0, -2.0, -3.0), "neg");
+    let c = a;
+    c += b;
+    c -= a;
+    c *= 2.0;
+    c /= 2.0;
+    expect(c == b, "assign ops");
+    expect(a[0] == 1.0 && a[2] == 3.0, "index");
+}
+
+#[test]
+fn products() {
+    expect(Vec2::new(1.0, 2.0).dot(Vec2::new(3.0, 4.0)) == 11.0, "dot2");
+    expect(Vec3::new(1.0, 2.0, 3.0).dot(Vec3::new(4.0, 5.0, 6.0)) == 32.0, "dot3");
+    expect(Vec4::new(1.0, 2.0, 3.0, 4.0).dot(Vec4::new(5.0, 6.0, 7.0, 8.0)) == 70.0, "dot4");
+    expect(Vec3::X.cross(Vec3::Y) == Vec3::Z, "x cross y");
+    expect(Vec3::Y.cross(Vec3::Z) == Vec3::X, "y cross z");
+    expect(Vec3::Z.cross(Vec3::X) == Vec3::Y, "z cross x");
+    let a = DVec3::new(1.0, -2.0, 0.5);
+    let b = DVec3::new(3.0, 1.0, -4.0);
+    let c = a.cross(b);
+    close(c.dot(a), 0.0, 1e-12, "cross orthogonal to a");
+    close(c.dot(b), 0.0, 1e-12, "cross orthogonal to b");
+    expect(Vec2::X.perp_dot(Vec2::Y) == 1.0, "perp_dot");
+}
+
+#[test]
+fn lengths() {
+    expect(Vec3::new(2.0, 3.0, 6.0).length() == 7.0, "length");
+    expect(Vec2::new(3.0, 4.0).normalize().approx_eq(Vec2::new(0.6, 0.8), 1e-15), "normalize");
+    expect(Vec3::ZERO.try_normalize() == none, "zero try_normalize");
+    expect(Vec3::ZERO.normalize_or_zero() == Vec3::ZERO, "normalize_or_zero");
+    expect(DVec3::new(0.0, 0.0, 1e-30).try_normalize() != none, "tiny but finite");
+    expect(DVec4::new(1.0, 1.0, 1.0, 1.0).normalize().is_normalized(), "is_normalized");
+    close(DVec3::X.angle_between(DVec3::new(1.0, 1.0, 0.0)), f64::PI / 4.0, 1e-12, "angle_between");
+    expect(Vec3::ONE.distance(Vec3::ONE) == 0.0, "distance");
+}
+
+#[test]
+fn interpolation() {
+    let a = Vec3::ZERO;
+    let b = Vec3::new(2.0, 4.0, 6.0);
+    expect(a.lerp(b, 0.0) == a && a.lerp(b, 1.0) == b, "lerp ends");
+    expect(a.lerp(b, 0.25) == Vec3::new(0.5, 1.0, 1.5), "lerp quarter");
+    expect(a.midpoint(b) == Vec3::new(1.0, 2.0, 3.0), "midpoint");
+}
+
+#[test]
+fn components() {
+    let v = Vec4::new(3.0, -1.0, 2.0, 0.5);
+    expect(v.min_element() == -1.0 && v.max_element() == 3.0, "min/max element");
+    expect(v.element_sum() == 4.5 && v.element_product() == -3.0, "sum/product");
+    expect(v.min(Vec4::ZERO) == Vec4::new(0.0, -1.0, 0.0, 0.0), "min");
+    expect(v.max(Vec4::ZERO) == Vec4::new(3.0, 0.0, 2.0, 0.5), "max");
+    expect(v.clamp(Vec4::splat(-0.5), Vec4::splat(1.0)) == Vec4::new(1.0, -0.5, 1.0, 0.5), "clamp");
+    expect(v.abs() == Vec4::new(3.0, 1.0, 2.0, 0.5), "abs");
+    expect(Vec2::new(1.5, -1.5).floor() == Vec2::new(1.0, -2.0), "floor");
+    expect(Vec2::new(1.5, -1.5).ceil() == Vec2::new(2.0, -1.0), "ceil");
+    expect(Vec2::new(1.5, -1.5).round() == Vec2::new(2.0, -2.0), "round");
+    expect(Vec3::new(1.0, 2.0, 3.0).to_array() == [1.0, 2.0, 3.0], "to_array");
+    expect(Vec3::from_array([1.0, 2.0, 3.0]) == Vec3::new(1.0, 2.0, 3.0), "from_array");
+}
+
+#[test]
+fn swizzles() {
+    let v = Vec3::new(1.0, 2.0, 3.0);
+    expect(v.xy() == Vec2::new(1.0, 2.0) && v.xz() == Vec2::new(1.0, 3.0) && v.yz() == Vec2::new(2.0, 3.0), "vec3 pairs");
+    expect(v.zyx() == Vec3::new(3.0, 2.0, 1.0) && v.yzx() == Vec3::new(2.0, 3.0, 1.0), "vec3 triples");
+    expect(v.extend(4.0).xyz() == v && v.extend(4.0).wzyx() == Vec4::new(4.0, 3.0, 2.0, 1.0), "vec4");
+    expect(Vec2::new(1.0, 2.0).yx().extend(0.0) == Vec3::new(2.0, 1.0, 0.0), "vec2");
+}
+
+#[test]
+fn reflection_and_projection() {
+    let v = DVec3::new(1.0, -1.0, 0.0);
+    expect(v.reflect(DVec3::Y) == DVec3::new(1.0, 1.0, 0.0), "reflect");
+    let p = DVec3::new(3.0, 4.0, 5.0);
+    expect(p.project_onto(DVec3::Z) == DVec3::new(0.0, 0.0, 5.0), "project");
+    expect(p.reject_from(DVec3::Z) == DVec3::new(3.0, 4.0, 0.0), "reject");
+    let u = DVec3::new(0.3, -0.5, 0.8).normalize();
+    let o = u.any_orthonormal();
+    close(o.dot(u), 0.0, 1e-12, "any_orthonormal is orthogonal");
+    close(o.length(), 1.0, 1e-12, "any_orthonormal is unit");
+}
+
+#[test]
+fn integer_vectors() {
+    let a = IVec3::new(1, -2, 3);
+    expect(a + IVec3::ONE == IVec3::new(2, -1, 4), "ivec add");
+    expect(-a == IVec3::new(-1, 2, -3), "ivec neg");
+    expect(a * 3 == 3 * a, "ivec scalar");
+    expect(a.dot(a) == 14, "ivec dot");
+    expect(IVec2::new(7, -7) / 2 == IVec2::new(3, -3), "ivec div truncates");
+    expect(UVec2::new(640, 480).element_product() == 307200, "uvec product");
+    expect(UVec4::new(1, 5, 3, 2).max_element() == 5, "uvec max");
+    expect(IVec3::new(4, 1, 9).min(IVec3::splat(3)) == IVec3::new(3, 1, 3), "ivec min");
+}
+
+#[test]
+fn angles2d() {
+    let v = DVec2::from_angle(f64::PI / 3.0);
+    close(v.to_angle(), f64::PI / 3.0, 1e-12, "angle round trip");
+    expect(Vec2::X.perp() == Vec2::Y, "perp");
+    let r = DVec2::from_angle(f64::PI / 2.0).rotate(DVec2::X);
+    expect(r.approx_eq(DVec2::Y, 1e-12), "rotate");
+}
+
+#[test]
+fn display() {
+    expect(f"{Vec3::new(1.0, 2.5, -3.0)}" == "(1, 2.5, -3)", f"vec3 display: {Vec3::new(1.0, 2.5, -3.0)}");
+    expect(f"{IVec2::new(1, 2)}" == "(1, 2)", "ivec2 display");
+}
+
+#[test]
+fn literal_defaults() {
+    let a = Vec3::new(1.0, 2.0, 3.0);
+    expect(a.type_name_of_val() == "Vec3", f"literals take T = f32: {a.type_name_of_val()}");
+    expect(Vec3::new(1, 2, 3) == a, "integer literals fill f32");
+    expect(Vec3::new(1.0, 2.0, 3.0) + Vec3::X == Vec3::new(2.0, 2.0, 3.0), "new + X");
+    expect(Vec3::X + Vec3::new(1.0, 2.0, 3.0) == Vec3::new(2.0, 2.0, 3.0), "X + new");
+    let d: DVec3 = Vec3::X;
+    expect(d == DVec3::X, "X from the expected type");
+    expect((DVec3::new(1.0, 2.0, 3.0) + Vec3::X).type_name_of_val() == "Vec3<f64>", "X beside a DVec3");
+    let m = Mat4::IDENTITY;
+    let v = Vec4::new(1.0, 2.0, 3.0, 4.0);
+    expect(m * v == v, "mat4 * open vec4");
+    let w = Vec3::new(1.0, 2.0, 3.0);
+    expect(w + Vec3::X == Vec3::new(2.0, 2.0, 3.0), "let + X");
+    expect(Vec3::X + w == Vec3::new(2.0, 2.0, 3.0), "X + let");
+    let u = Vec3::new(1.0, 2.0, 3.0);
+    u += Vec3::X;
+    expect(u == Vec3::new(2.0, 2.0, 3.0), "+= X");
+    let x: f64 = 2.0;
+    expect(Vec3::new(x, 0.0, 0.0).type_name_of_val() == "Vec3<f64>", "a typed argument fixes T");
+}

@@ -1,0 +1,247 @@
+//! `Transform<T>`: translation, rotation and scale kept apart.
+
+use pkg::{Affine3, Mat3, Mat4, Quat, Real, Vec3};
+use core::ops::Mul;
+use core::reflect::Inspect;
+
+/// An object's place in a scene as separate parts: scale first, then
+/// rotation, then translation. Easier to edit and to interpolate than a
+/// matrix; `to_mat4` gives the model matrix. Directions follow the
+/// right-handed, y-up, -z-forward convention of `look_at_rh`.
+/// `#[repr(C)]`: `translation`, `rotation`, `scale`, ten `T`s.
+///
+/// ```nabi
+/// use spatial::{Quat, Transform, Vec3};
+///
+/// let t = Transform::new(Vec3::new(0.0, 1.0, 0.0), Quat::from_rotation_y(f32::PI), Vec3::ONE);
+/// assert(t.transform_point(Vec3::X).approx_eq(Vec3::new(-1.0, 1.0, 0.0), 1e-6));
+/// assert(t.forward().approx_eq(Vec3::Z, 1e-6));
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, Inspect)]
+#[cfg_attr(feature = "nabion", derive(Nabion))]
+pub struct Transform<T = f32> {
+    pub translation: Vec3<T>;
+    pub rotation: Quat<T>;
+    pub scale: Vec3<T>;
+}
+
+/// `Transform<f64>`.
+///
+/// ```nabi
+/// assert(spatial::DTransform::identity().scale == spatial::DVec3::ONE);
+/// ```
+pub type DTransform = Transform<f64>;
+
+impl<T: Real> Transform<T> {
+    /// The transform of its three parts.
+    ///
+    /// ```nabi
+    /// use spatial::{Quat, Transform, Vec3};
+    ///
+    /// assert(Transform::new(Vec3::ZERO, Quat::IDENTITY, Vec3::ONE) == Transform::identity());
+    /// ```
+    pub const fn new(translation: Vec3<T>, rotation: Quat<T>, scale: Vec3<T>) -> Transform<T> {
+        Transform { translation: translation, rotation: rotation, scale: scale }
+    }
+
+    /// No change.
+    ///
+    /// ```nabi
+    /// use spatial::{Transform, Vec3};
+    ///
+    /// assert(Transform::identity().transform_point(Vec3::ONE) == Vec3::ONE);
+    /// ```
+    pub fn identity() -> Transform<T> { Transform { translation: Vec3::zero(), rotation: Quat::identity(), scale: Vec3::one() } }
+
+    /// Only a translation.
+    ///
+    /// ```nabi
+    /// use spatial::{Transform, Vec3};
+    ///
+    /// assert(Transform::from_translation(Vec3::X).transform_point(Vec3::ZERO) == Vec3::X);
+    /// ```
+    pub fn from_translation(t: Vec3<T>) -> Transform<T> { Transform { translation: t, rotation: Quat::identity(), scale: Vec3::one() } }
+
+    /// Only a rotation.
+    ///
+    /// ```nabi
+    /// use spatial::{Quat, Transform};
+    ///
+    /// assert(Transform::from_rotation(Quat::IDENTITY) == Transform::identity());
+    /// ```
+    pub fn from_rotation(r: Quat<T>) -> Transform<T> { Transform { translation: Vec3::zero(), rotation: r, scale: Vec3::one() } }
+
+    /// Only a scale.
+    ///
+    /// ```nabi
+    /// use spatial::{Transform, Vec3};
+    ///
+    /// assert(Transform::from_scale(Vec3::splat(2.0)).transform_point(Vec3::ONE) == Vec3::splat(2.0));
+    /// ```
+    pub fn from_scale(s: Vec3<T>) -> Transform<T> { Transform { translation: Vec3::zero(), rotation: Quat::identity(), scale: s } }
+
+    /// The parts of a matrix without shear or projection: see
+    /// `Mat4::to_scale_rotation_translation`.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat4, Transform, Vec3};
+    ///
+    /// let t = Transform::from_mat4(Mat4::from_translation(Vec3::ONE));
+    /// assert(t.translation == Vec3::ONE && t.scale.approx_eq(Vec3::ONE, 1e-6));
+    /// ```
+    pub fn from_mat4(m: Mat4<T>) -> Transform<T> {
+        let (s, r, t) = m.to_scale_rotation_translation();
+        Transform { translation: t, rotation: r, scale: s }
+    }
+
+    /// The model matrix: scale, then rotate, then translate.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat4, Transform, Vec3};
+    ///
+    /// let t = Transform::from_translation(Vec3::X);
+    /// assert(t.to_mat4() == Mat4::from_translation(Vec3::X));
+    /// ```
+    pub fn to_mat4(self) -> Mat4<T> { Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation) }
+
+    /// The same transform as an `Affine3`.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Transform};
+    ///
+    /// assert(Transform::<f32>::identity().to_affine() == Affine3::identity());
+    /// ```
+    pub fn to_affine(self) -> Affine3<T> { Affine3::from_scale_rotation_translation(self.scale, self.rotation, self.translation) }
+
+    /// The point `p` scaled, rotated and moved.
+    ///
+    /// ```nabi
+    /// use spatial::{Quat, Transform, Vec3};
+    ///
+    /// let t = Transform::new(Vec3::X, Quat::IDENTITY, Vec3::splat(2.0));
+    /// assert(t.transform_point(Vec3::ONE) == Vec3::new(3.0, 2.0, 2.0));
+    /// ```
+    pub fn transform_point(self, p: Vec3<T>) -> Vec3<T> { self.rotation * (p * self.scale) + self.translation }
+
+    /// The direction `v` scaled and rotated, not moved.
+    ///
+    /// ```nabi
+    /// use spatial::{Transform, Vec3};
+    ///
+    /// assert(Transform::from_translation(Vec3::X).transform_vector(Vec3::Y) == Vec3::Y);
+    /// ```
+    pub fn transform_vector(self, v: Vec3<T>) -> Vec3<T> { self.rotation * (v * self.scale) }
+
+    /// The local -z axis in world space: where the object faces.
+    ///
+    /// ```nabi
+    /// use spatial::{Transform, Vec3};
+    ///
+    /// assert(Transform::<f32>::identity().forward() == -Vec3::Z);
+    /// ```
+    pub fn forward(self) -> Vec3<T> { self.rotation * -Vec3::unit_z() }
+
+    /// The local +x axis in world space.
+    ///
+    /// ```nabi
+    /// use spatial::{Transform, Vec3};
+    ///
+    /// assert(Transform::<f32>::identity().right() == Vec3::X);
+    /// ```
+    pub fn right(self) -> Vec3<T> { self.rotation * Vec3::unit_x() }
+
+    /// The local +y axis in world space.
+    ///
+    /// ```nabi
+    /// use spatial::{Transform, Vec3};
+    ///
+    /// assert(Transform::<f32>::identity().up() == Vec3::Y);
+    /// ```
+    pub fn up(self) -> Vec3<T> { self.rotation * Vec3::unit_y() }
+
+    /// The same transform turned so `forward()` points at `target`, with
+    /// `up` roughly up. Translation and scale stay.
+    ///
+    /// ```nabi
+    /// use spatial::{Transform, Vec3};
+    ///
+    /// let t = Transform::from_translation(Vec3::ZERO).looking_at(Vec3::X, Vec3::Y);
+    /// assert(t.forward().approx_eq(Vec3::X, 1e-6));
+    /// ```
+    pub fn looking_at(self, target: Vec3<T>, up: Vec3<T>) -> Transform<T> {
+        let back = (self.translation - target).normalize();
+        let right = up.cross(back).normalize();
+        let up = back.cross(right);
+        Transform { translation: self.translation, rotation: Quat::from_mat3(Mat3::from_cols(right, up, back)), scale: self.scale }
+    }
+
+    /// `self` after `child`: the child's transform in this one's space,
+    /// as a scene graph composes a parent and a child. Exact when the
+    /// parent's scale is uniform; otherwise the shear that the product
+    /// would have is dropped (use `Affine3` or `Mat4` for that).
+    ///
+    /// ```nabi
+    /// use spatial::{Transform, Vec3};
+    ///
+    /// let parent = Transform::from_translation(Vec3::X);
+    /// let child = Transform::from_translation(Vec3::Y);
+    /// assert(parent.mul_transform(child).translation == Vec3::new(1.0, 1.0, 0.0));
+    /// ```
+    pub fn mul_transform(self, child: Transform<T>) -> Transform<T> {
+        Transform {
+            translation: self.transform_point(child.translation),
+            rotation: self.rotation * child.rotation,
+            scale: self.scale * child.scale,
+        }
+    }
+
+    /// The inverse; exact for a uniform scale.
+    ///
+    /// ```nabi
+    /// use spatial::{DQuat, DTransform, DVec3};
+    ///
+    /// let t = DTransform::new(DVec3::ONE, DQuat::from_rotation_x(0.5), DVec3::splat(2.0));
+    /// assert(t.inverse().mul_transform(t).transform_point(DVec3::X).approx_eq(DVec3::X, 1e-12));
+    /// ```
+    pub fn inverse(self) -> Transform<T> {
+        let r = self.rotation.inverse();
+        let s = self.scale.recip();
+        Transform { translation: r * (-self.translation) * s, rotation: r, scale: s }
+    }
+
+    /// The transform `t` of the way from `self` to `o`: translation and
+    /// scale linear, rotation by `slerp`. For animation blending.
+    ///
+    /// ```nabi
+    /// use spatial::{Transform, Vec3};
+    ///
+    /// let a = Transform::from_translation(Vec3::ZERO);
+    /// let b = Transform::from_translation(Vec3::splat(2.0));
+    /// assert(a.lerp(b, 0.5).translation == Vec3::ONE);
+    /// ```
+    pub fn lerp(self, o: Transform<T>, t: T) -> Transform<T> {
+        Transform {
+            translation: self.translation.lerp(o.translation, t),
+            rotation: self.rotation.slerp(o.rotation, t),
+            scale: self.scale.lerp(o.scale, t),
+        }
+    }
+
+    /// Whether every part is within `eps` of `o`'s.
+    ///
+    /// ```nabi
+    /// use spatial::{Transform, Vec3};
+    ///
+    /// assert(Transform::identity().approx_eq(Transform::from_translation(Vec3::splat(1e-7)), 1e-6));
+    /// ```
+    pub fn approx_eq(self, o: Transform<T>, eps: T) -> bool {
+        self.translation.approx_eq(o.translation, eps) && self.rotation.approx_eq(o.rotation, eps) && self.scale.approx_eq(o.scale, eps)
+    }
+}
+
+/// `parent * child`, the same as `parent.mul_transform(child)`.
+impl<T: Real> Mul for Transform<T> {
+    type Output = Transform<T>;
+    fn mul(self, child: Transform<T>) -> Transform<T> { self.mul_transform(child) }
+}

@@ -1,0 +1,105 @@
+//! `Vec3A<T>`: a `Vec3` padded to the 16-byte alignment GPUs give `vec3`.
+
+use pkg::{Real, Scalar, Vec3};
+use core::ops::{Add, Mul, Sub};
+use core::reflect::Inspect;
+
+/// A `Vec3` stored in 16 bytes, aligned to 16, as a `vec3<f32>` sits in
+/// a WGSL uniform or std140 / std430 buffer: a struct of `Vec3A`s
+/// matches the shader's layout with no hand-written padding. Convert
+/// with `Vec3A::from(v)` and `.to_vec3()`; the arithmetic is `Vec3`'s.
+///
+/// ```nabi
+/// use spatial::{Vec3, Vec3A};
+///
+/// let a = Vec3A::from(Vec3::new(1.0, 2.0, 3.0));
+/// assert(Vec3A::<f32>::size() == 16 && Vec3A::<f32>::align() == 16);
+/// assert((a + a).to_vec3() == Vec3::new(2.0, 4.0, 6.0));
+/// ```
+#[repr(C, align(16))]
+#[derive(Clone, Copy, PartialEq, Debug, Inspect)]
+#[cfg_attr(feature = "nabion", derive(Nabion))]
+pub struct Vec3A<T = f32> {
+    pub x: T;
+    pub y: T;
+    pub z: T;
+}
+
+impl<T: Scalar> Vec3A<T> {
+    /// The vector of its components.
+    ///
+    /// ```nabi
+    /// assert(spatial::Vec3A::new(1.0, 2.0, 3.0).z == 3.0);
+    /// ```
+    pub const fn new(x: T, y: T, z: T) -> Vec3A<T> { Vec3A { x: x, y: y, z: z } }
+
+    /// The padded form of `v`.
+    ///
+    /// ```nabi
+    /// use spatial::{Vec3, Vec3A};
+    ///
+    /// assert(Vec3A::from(Vec3::<f32>::X).x == 1.0);
+    /// ```
+    pub const fn from(v: Vec3<T>) -> Vec3A<T> { Vec3A { x: v.x, y: v.y, z: v.z } }
+
+    /// The unpadded `Vec3`.
+    ///
+    /// ```nabi
+    /// use spatial::{Vec3, Vec3A};
+    ///
+    /// assert(Vec3A::new(1.0, 2.0, 3.0).to_vec3() == Vec3::new(1.0, 2.0, 3.0));
+    /// ```
+    pub const fn to_vec3(self) -> Vec3<T> { Vec3 { x: self.x, y: self.y, z: self.z } }
+
+    /// The dot product.
+    ///
+    /// ```nabi
+    /// assert(spatial::Vec3A::new(1.0, 2.0, 3.0).dot(spatial::Vec3A::new(1.0, 1.0, 1.0)) == 6.0);
+    /// ```
+    pub fn dot(self, o: Vec3A<T>) -> T { self.to_vec3().dot(o.to_vec3()) }
+}
+
+impl<T: Real> Vec3A<T> {
+    /// The cross product, as `Vec3::cross`.
+    ///
+    /// ```nabi
+    /// use spatial::{Vec3, Vec3A};
+    ///
+    /// assert(Vec3A::from(Vec3::<f32>::X).cross(Vec3A::from(Vec3::Y)).to_vec3() == Vec3::Z);
+    /// ```
+    pub fn cross(self, o: Vec3A<T>) -> Vec3A<T> { Vec3A::from(self.to_vec3().cross(o.to_vec3())) }
+
+    /// The length.
+    ///
+    /// ```nabi
+    /// assert(spatial::Vec3A::new(3.0, 4.0, 0.0).length() == 5.0);
+    /// ```
+    pub fn length(self) -> T { self.to_vec3().length() }
+
+    /// The unit vector, as `Vec3::normalize`.
+    ///
+    /// ```nabi
+    /// assert(spatial::Vec3A::new(0.0, 0.0, 2.0).normalize().z == 1.0);
+    /// ```
+    pub fn normalize(self) -> Vec3A<T> { Vec3A::from(self.to_vec3().normalize()) }
+}
+
+impl<T: Scalar> Add for Vec3A<T> {
+    type Output = Vec3A<T>;
+    fn add(self, o: Vec3A<T>) -> Vec3A<T> { Vec3A::from(self.to_vec3() + o.to_vec3()) }
+}
+
+impl<T: Scalar> Sub for Vec3A<T> {
+    type Output = Vec3A<T>;
+    fn sub(self, o: Vec3A<T>) -> Vec3A<T> { Vec3A::from(self.to_vec3() - o.to_vec3()) }
+}
+
+impl<T: Scalar> Mul<T> for Vec3A<T> {
+    type Output = Vec3A<T>;
+    fn mul(self, s: T) -> Vec3A<T> { Vec3A::from(self.to_vec3() * s) }
+}
+
+/// `(x, y, z)`.
+impl<T: Scalar> Display for Vec3A<T> {
+    fn fmt(self, ref f: Formatter) throws (FmtError) { try Display::fmt(self.to_vec3(), ref f) }
+}

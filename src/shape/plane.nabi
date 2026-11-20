@@ -1,0 +1,105 @@
+//! `Plane<T>`: an infinite plane.
+
+use pkg::{Real, Vec3, Vec4};
+use core::reflect::Inspect;
+
+/// The points `p` with `normal.dot(p) + d == 0`. With a unit `normal`,
+/// `distance` is the signed distance, positive on the side the normal
+/// points to. `#[repr(C)]`: `normal` then `d`, the `(a, b, c, d)` of a
+/// shader's plane equation.
+///
+/// ```nabi
+/// use spatial::{Plane, Vec3};
+///
+/// let ground = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
+/// assert(ground.distance(Vec3::new(5.0, 2.0, 1.0)) == 2.0);
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, Inspect)]
+#[cfg_attr(feature = "nabion", derive(Nabion))]
+pub struct Plane<T = f32> {
+    pub normal: Vec3<T>;
+    pub d: T;
+}
+
+impl<T: Real> Plane<T> {
+    /// The plane `normal . p + d = 0`, as given.
+    ///
+    /// ```nabi
+    /// use spatial::{Plane, Vec3};
+    ///
+    /// assert(Plane::new(Vec3::Y, -1.0).distance(Vec3::ZERO) == -1.0);
+    /// ```
+    pub const fn new(normal: Vec3<T>, d: T) -> Plane<T> { Plane { normal: normal, d: d } }
+
+    /// The plane through `p` with unit normal `n`.
+    ///
+    /// ```nabi
+    /// use spatial::{Plane, Vec3};
+    ///
+    /// assert(Plane::from_point_normal(Vec3::Y, Vec3::Y).d == -1.0);
+    /// ```
+    pub fn from_point_normal(p: Vec3<T>, n: Vec3<T>) -> Plane<T> { Plane { normal: n, d: -n.dot(p) } }
+
+    /// The plane through three points, its normal toward the side from
+    /// which `a`, `b`, `c` run counterclockwise. Points on one line give
+    /// a NaN normal.
+    ///
+    /// ```nabi
+    /// use spatial::{Plane, Vec3};
+    ///
+    /// let p = Plane::from_points(Vec3::ZERO, Vec3::X, Vec3::Y);
+    /// assert(p.normal == Vec3::Z && p.d == 0.0);
+    /// ```
+    pub fn from_points(a: Vec3<T>, b: Vec3<T>, c: Vec3<T>) -> Plane<T> {
+        Plane::from_point_normal(a, (b - a).cross(c - a).normalize())
+    }
+
+    /// The plane of `(a, b, c, d)`, as a frustum row gives it.
+    ///
+    /// ```nabi
+    /// use spatial::{Plane, Vec4};
+    ///
+    /// assert(Plane::from_vec4(Vec4::new(0.0, 1.0, 0.0, 2.0)).d == 2.0);
+    /// ```
+    pub fn from_vec4(v: Vec4<T>) -> Plane<T> { Plane { normal: v.xyz(), d: v.w } }
+
+    /// `(normal, d)` as a `Vec4`.
+    ///
+    /// ```nabi
+    /// use spatial::{Plane, Vec3, Vec4};
+    ///
+    /// assert(Plane::new(Vec3::Y, 2.0).to_vec4() == Vec4::new(0.0, 1.0, 0.0, 2.0));
+    /// ```
+    pub fn to_vec4(self) -> Vec4<T> { self.normal.extend(self.d) }
+
+    /// The same plane with a unit normal (needed for `distance`).
+    ///
+    /// ```nabi
+    /// use spatial::{Plane, Vec3};
+    ///
+    /// assert(Plane::new(Vec3::new(0.0, 2.0, 0.0), 2.0).normalize() == Plane::new(Vec3::Y, 1.0));
+    /// ```
+    pub fn normalize(self) -> Plane<T> {
+        let r = self.normal.length_recip();
+        Plane { normal: self.normal * r, d: self.d * r }
+    }
+
+    /// `normal . p + d`: the signed distance for a unit normal.
+    ///
+    /// ```nabi
+    /// use spatial::{Plane, Vec3};
+    ///
+    /// assert(Plane::new(Vec3::Z, 0.0).distance(Vec3::new(0.0, 0.0, -3.0)) == -3.0);
+    /// ```
+    pub fn distance(self, p: Vec3<T>) -> T { self.normal.dot(p) + self.d }
+
+    /// The point of the plane nearest `p` (unit normal).
+    ///
+    /// ```nabi
+    /// use spatial::{Plane, Vec3};
+    ///
+    /// assert(Plane::new(Vec3::Y, 0.0).project(Vec3::ONE) == Vec3::new(1.0, 0.0, 1.0));
+    /// ```
+    pub fn project(self, p: Vec3<T>) -> Vec3<T> { p - self.normal * self.distance(p) }
+}

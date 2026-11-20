@@ -1,0 +1,740 @@
+//! `Vec4<T>`: 4 components, `x`, `y`, `z`, `w`, of a `Scalar`.
+
+use pkg::vec::{Vec2, Vec3};
+use pkg::{Real, Scalar};
+use core::index::Index;
+use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use core::reflect::Inspect;
+use core::simd::Simd;
+
+/// A 4-component vector. `Vec4` alone is `Vec4<f32>`; `DVec4`,
+/// `IVec4` and `UVec4` are the `f64`, `i32` and `u32` forms.
+/// `#[repr(C)]`: four `T`s in order, no padding; `Vec4` (f32) is 16
+/// bytes, aligned to 4; a GPU aligns `vec4<f32>` to 16, so start a
+/// buffer struct with it or pad before it.
+///
+/// ```nabi
+/// use spatial::Vec4;
+///
+/// let v = Vec4::new(1.0, 2.0, 3.0, 4.0);
+/// assert(v.x == 1.0 && v.y == 2.0);
+/// assert(Vec4::<f32>::size() == 16);
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, Inspect)]
+#[cfg_attr(feature = "nabion", derive(Nabion))]
+pub struct Vec4<T = f32> {
+    pub x: T;
+    pub y: T;
+    pub z: T;
+    pub w: T;
+}
+
+impl<T: Scalar> Vec4<T> {
+    /// The vector of its components.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).w == 4.0);
+    /// ```
+    pub const fn new(x: T, y: T, z: T, w: T) -> Vec4<T> {
+        Vec4 { x: x, y: y, z: z, w: w }
+    }
+
+    /// Every component `v`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::splat(2.0) == Vec4::new(2.0, 2.0, 2.0, 2.0));
+    /// ```
+    pub const fn splat(v: T) -> Vec4<T> {
+        Vec4 { x: v, y: v, z: v, w: v }
+    }
+
+    /// All zero.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::zero() == Vec4::splat(0.0));
+    /// ```
+    pub fn zero() -> Vec4<T> {
+        Vec4::splat(T::zero())
+    }
+
+    /// All one.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::one() == Vec4::splat(1.0));
+    /// ```
+    pub fn one() -> Vec4<T> {
+        Vec4::splat(T::one())
+    }
+
+    /// The unit vector along `x`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::unit_x().x == 1.0);
+    /// ```
+    pub fn unit_x() -> Vec4<T> {
+        Vec4 { x: T::one(), y: T::zero(), z: T::zero(), w: T::zero() }
+    }
+
+    /// The unit vector along `y`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::unit_y().y == 1.0);
+    /// ```
+    pub fn unit_y() -> Vec4<T> {
+        Vec4 { x: T::zero(), y: T::one(), z: T::zero(), w: T::zero() }
+    }
+
+    /// The unit vector along `z`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::unit_z().z == 1.0);
+    /// ```
+    pub fn unit_z() -> Vec4<T> {
+        Vec4 { x: T::zero(), y: T::zero(), z: T::one(), w: T::zero() }
+    }
+
+    /// The unit vector along `w`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::unit_w().w == 1.0);
+    /// ```
+    pub fn unit_w() -> Vec4<T> {
+        Vec4 { x: T::zero(), y: T::zero(), z: T::zero(), w: T::one() }
+    }
+
+    /// From `[x, y, z, w]`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::from_array([1.0, 2.0, 3.0, 4.0]) == Vec4::new(1.0, 2.0, 3.0, 4.0));
+    /// ```
+    pub const fn from_array(a: [T; 4]) -> Vec4<T> {
+        Vec4 { x: a[0], y: a[1], z: a[2], w: a[3] }
+    }
+
+    /// `[x, y, z, w]`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).to_array() == [1.0, 2.0, 3.0, 4.0]);
+    /// ```
+    pub const fn to_array(self) -> [T; 4] {
+        [self.x, self.y, self.z, self.w]
+    }
+
+    /// The dot product.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).dot(Vec4::new(5.0, 6.0, 7.0, 8.0)) == 70.0);
+    /// ```
+    pub fn dot(self, o: Vec4<T>) -> T {
+        self.x * o.x + self.y * o.y + self.z * o.z + self.w * o.w
+    }
+
+    /// `self.dot(self)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).length_squared() == Vec4::new(1.0, 2.0, 3.0, 4.0).dot(Vec4::new(1.0, 2.0, 3.0, 4.0)));
+    /// ```
+    pub fn length_squared(self) -> T {
+        self.dot(self)
+    }
+
+    /// The squared distance to `o`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::zero().distance_squared(Vec4::splat(1.0)) == 4.0);
+    /// ```
+    pub fn distance_squared(self, o: Vec4<T>) -> T {
+        (self - o).length_squared()
+    }
+
+    /// The smaller of each pair of components.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).min(Vec4::splat(1.5)).w == 1.5);
+    /// ```
+    pub fn min(self, o: Vec4<T>) -> Vec4<T> {
+        Vec4 { x: if o.x < self.x { o.x } else { self.x }, y: if o.y < self.y { o.y } else { self.y }, z: if o.z < self.z { o.z } else { self.z }, w: if o.w < self.w { o.w } else { self.w } }
+    }
+
+    /// The larger of each pair of components.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).max(Vec4::splat(1.5)).x == 1.5);
+    /// ```
+    pub fn max(self, o: Vec4<T>) -> Vec4<T> {
+        Vec4 { x: if o.x > self.x { o.x } else { self.x }, y: if o.y > self.y { o.y } else { self.y }, z: if o.z > self.z { o.z } else { self.z }, w: if o.w > self.w { o.w } else { self.w } }
+    }
+
+    /// Each component limited to `lo..=hi`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).clamp(Vec4::splat(1.5), Vec4::splat(1.5)) == Vec4::splat(1.5));
+    /// ```
+    pub fn clamp(self, lo: Vec4<T>, hi: Vec4<T>) -> Vec4<T> {
+        self.max(lo).min(hi)
+    }
+
+    /// The smallest component.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).min_element() == 1.0);
+    /// ```
+    pub fn min_element(self) -> T {
+        let m = self.x;
+        if self.y < m { m = self.y; }
+        if self.z < m { m = self.z; }
+        if self.w < m { m = self.w; }
+        m
+    }
+
+    /// The largest component.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).max_element() == 4.0);
+    /// ```
+    pub fn max_element(self) -> T {
+        let m = self.x;
+        if self.y > m { m = self.y; }
+        if self.z > m { m = self.z; }
+        if self.w > m { m = self.w; }
+        m
+    }
+
+    /// The sum of the components.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).element_sum() == 10.0);
+    /// ```
+    pub fn element_sum(self) -> T {
+        self.x + self.y + self.z + self.w
+    }
+
+    /// The product of the components.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).element_product() == 24.0);
+    /// ```
+    pub fn element_product(self) -> T {
+        self.x * self.y * self.z * self.w
+    }
+
+    /// Each component through `f`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).map(|c: f64| -> f64 { c * 2.0 }) == Vec4::new(1.0, 2.0, 3.0, 4.0) * 2.0);
+    /// ```
+    pub fn map<U>(self, f: fn(T) -> U) -> Vec4<U> {
+        Vec4 { x: f(self.x), y: f(self.y), z: f(self.z), w: f(self.w) }
+    }
+
+    /// The four lanes as a `Simd<T, 4>`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).simd().reduce_sum() == 10.0);
+    /// ```
+    #[inline(always)]
+    pub fn simd(self) -> Simd<T, 4> {
+        Simd::from_array([self.x, self.y, self.z, self.w])
+    }
+
+    /// The vector of four lanes.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    /// use core::simd::Simd;
+    ///
+    /// assert(Vec4::from_simd(Simd::<f32, 4>::splat(1.0)) == Vec4::one());
+    /// ```
+    #[inline(always)]
+    pub fn from_simd(s: Simd<T, 4>) -> Vec4<T> {
+        let a = s.to_array();
+        Vec4 { x: a[0], y: a[1], z: a[2], w: a[3] }
+    }
+
+    /// `(x, y)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).xy().y == 2.0);
+    /// ```
+    pub const fn xy(self) -> Vec2<T> {
+        Vec2 { x: self.x, y: self.y }
+    }
+
+    /// `(x, y, z)`, dropping `w`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).xyz().z == 3.0);
+    /// ```
+    pub const fn xyz(self) -> Vec3<T> {
+        Vec3 { x: self.x, y: self.y, z: self.z }
+    }
+
+    /// `(w, z, y, x)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).wzyx().x == 4.0);
+    /// ```
+    pub const fn wzyx(self) -> Vec4<T> {
+        Vec4 { x: self.w, y: self.z, z: self.y, w: self.x }
+    }
+}
+
+impl<T: Real> Vec4<T> {
+    /// The length.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(3.0, 4.0, 0.0, 0.0).length() == 5.0);
+    /// ```
+    pub fn length(self) -> T {
+        self.length_squared().sqrt()
+    }
+
+    /// `1 / length`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(0.0, 4.0, 0.0, 0.0).length_recip() == 0.25);
+    /// ```
+    pub fn length_recip(self) -> T {
+        T::one() / self.length()
+    }
+
+    /// The distance to `o`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::zero().distance(Vec4::new(3.0, 4.0, 0.0, 0.0)) == 5.0);
+    /// ```
+    pub fn distance(self, o: Vec4<T>) -> T {
+        (self - o).length()
+    }
+
+    /// The vector of length 1 in the same direction. A zero vector gives
+    /// NaN components; `try_normalize` or `normalize_or_zero` handle it.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(0.0, 2.0, 0.0, 0.0).normalize() == Vec4::new(0.0, 1.0, 0.0, 0.0));
+    /// ```
+    pub fn normalize(self) -> Vec4<T> {
+        self * self.length_recip()
+    }
+
+    /// The unit vector, or `none` for a zero, tiny or non-finite one.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::zero().try_normalize() == none);
+    /// ```
+    pub fn try_normalize(self) -> Vec4<T> | none {
+        let r = self.length_recip();
+        if r.is_finite() && r > T::zero() { self * r } else { none }
+    }
+
+    /// The unit vector, or zero where `try_normalize` gives `none`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::zero().normalize_or_zero() == Vec4::zero());
+    /// ```
+    pub fn normalize_or_zero(self) -> Vec4<T> {
+        match self.try_normalize() {
+            v: Vec4<T> => v,
+            none => Vec4::zero(),
+        }
+    }
+
+    /// Whether the length is 1, within `1e-4` of the squared length.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::unit_x().is_normalized());
+    /// ```
+    pub fn is_normalized(self) -> bool {
+        (self.length_squared() - T::one()).abs() <= T::from_f64(1e-4)
+    }
+
+    /// `self + (o - self) * t`: `t = 0` gives `self`, `t = 1` gives `o`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::zero().lerp(Vec4::splat(2.0), 0.5) == Vec4::one());
+    /// ```
+    pub fn lerp(self, o: Vec4<T>, t: T) -> Vec4<T> {
+        self + (o - self) * t
+    }
+
+    /// The midpoint of `self` and `o`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::<f32>::zero().midpoint(Vec4::splat(2.0)) == Vec4::one());
+    /// ```
+    pub fn midpoint(self, o: Vec4<T>) -> Vec4<T> {
+        (self + o) * T::from_f64(0.5)
+    }
+
+    /// Whether every component is within `eps` of `o`'s.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::new(1.0, 2.0, 3.0, 4.0).approx_eq(Vec4::new(1.0, 2.0, 3.0, 4.0) + Vec4::splat(1e-7), 1e-6));
+    /// ```
+    pub fn approx_eq(self, o: Vec4<T>, eps: T) -> bool {
+        (self.x - o.x).abs() <= eps && (self.y - o.y).abs() <= eps && (self.z - o.z).abs() <= eps && (self.w - o.w).abs() <= eps
+    }
+
+    /// Each component's absolute value.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert((-Vec4::<f32>::one()).abs() == Vec4::one());
+    /// ```
+    pub fn abs(self) -> Vec4<T> {
+        Vec4 { x: self.x.abs(), y: self.y.abs(), z: self.z.abs(), w: self.w.abs() }
+    }
+
+    /// Each component rounded down.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::splat(1.5).floor() == Vec4::one());
+    /// ```
+    pub fn floor(self) -> Vec4<T> {
+        Vec4 { x: self.x.floor(), y: self.y.floor(), z: self.z.floor(), w: self.w.floor() }
+    }
+
+    /// Each component rounded up.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::splat(0.5).ceil() == Vec4::one());
+    /// ```
+    pub fn ceil(self) -> Vec4<T> {
+        Vec4 { x: self.x.ceil(), y: self.y.ceil(), z: self.z.ceil(), w: self.w.ceil() }
+    }
+
+    /// Each component rounded to the nearest integer, half away from zero.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::splat(0.5).round() == Vec4::one());
+    /// ```
+    pub fn round(self) -> Vec4<T> {
+        Vec4 { x: self.x.round(), y: self.y.round(), z: self.z.round(), w: self.w.round() }
+    }
+
+    /// `1 / c` of each component.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::splat(4.0).recip() == Vec4::splat(0.25));
+    /// ```
+    pub fn recip(self) -> Vec4<T> {
+        Vec4 { x: T::one() / self.x, y: T::one() / self.y, z: T::one() / self.z, w: T::one() / self.w }
+    }
+
+    /// Whether no component is NaN or infinite.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(!Vec4::splat(1.0 / 0.0).is_finite());
+    /// ```
+    pub fn is_finite(self) -> bool {
+        self.x.is_finite() && self.y.is_finite() && self.z.is_finite() && self.w.is_finite()
+    }
+
+    /// The part of `self` along `onto` (which need not be unit length).
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::splat(2.0).project_onto(Vec4::unit_x()) == Vec4::unit_x() * 2.0);
+    /// ```
+    pub fn project_onto(self, onto: Vec4<T>) -> Vec4<T> {
+        onto * (self.dot(onto) / onto.length_squared())
+    }
+
+    /// The part of `self` at right angles to `from`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::splat(2.0).reject_from(Vec4::unit_x()).x == 0.0);
+    /// ```
+    pub fn reject_from(self, from: Vec4<T>) -> Vec4<T> {
+        self - self.project_onto(from)
+    }
+
+    /// `self` mirrored by the plane through 0 with unit normal `n`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert(Vec4::splat(1.0).reflect(Vec4::unit_x()).x == -1.0);
+    /// ```
+    pub fn reflect(self, n: Vec4<T>) -> Vec4<T> {
+        self - n * (T::from_f64(2.0) * self.dot(n))
+    }
+
+    /// The angle to `o` in radians, in `0..=pi`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec4;
+    ///
+    /// assert((Vec4::<f64>::unit_x().angle_between(Vec4::unit_y()) - f64::PI / 2.0).abs() < 1e-12);
+    /// ```
+    pub fn angle_between(self, o: Vec4<T>) -> T {
+        let c = self.dot(o) / (self.length_squared() * o.length_squared()).sqrt();
+        c.max(-T::one()).min(T::one()).acos()
+    }
+}
+
+#[impl_macro(vec4_consts)] @macro {
+    (@rep[sep = ","] { @t: ty }) => {
+        @for @t {
+            impl Vec4<@t> {
+                /// All zero.
+                ///
+                /// ```nabi
+                /// use spatial::Vec4;
+                ///
+                /// assert(Vec4::ZERO == Vec4::zero());
+                /// ```
+                pub const ZERO: Vec4<@t> = Vec4 { x: 0 as @t, y: 0 as @t, z: 0 as @t, w: 0 as @t };
+                /// All one.
+                ///
+                /// ```nabi
+                /// use spatial::Vec4;
+                ///
+                /// assert(Vec4::ONE == Vec4::one());
+                /// ```
+                pub const ONE: Vec4<@t> = Vec4 { x: 1 as @t, y: 1 as @t, z: 1 as @t, w: 1 as @t };
+                /// The unit vector along `x`.
+                ///
+                /// ```nabi
+                /// use spatial::Vec4;
+                ///
+                /// assert(Vec4::X == Vec4::unit_x());
+                /// ```
+                pub const X: Vec4<@t> = Vec4 { x: 1 as @t, y: 0 as @t, z: 0 as @t, w: 0 as @t };
+                /// The unit vector along `y`.
+                ///
+                /// ```nabi
+                /// use spatial::Vec4;
+                ///
+                /// assert(Vec4::Y == Vec4::unit_y());
+                /// ```
+                pub const Y: Vec4<@t> = Vec4 { x: 0 as @t, y: 1 as @t, z: 0 as @t, w: 0 as @t };
+                /// The unit vector along `z`.
+                ///
+                /// ```nabi
+                /// use spatial::Vec4;
+                ///
+                /// assert(Vec4::Z == Vec4::unit_z());
+                /// ```
+                pub const Z: Vec4<@t> = Vec4 { x: 0 as @t, y: 0 as @t, z: 1 as @t, w: 0 as @t };
+                /// The unit vector along `w`.
+                ///
+                /// ```nabi
+                /// use spatial::Vec4;
+                ///
+                /// assert(Vec4::W == Vec4::unit_w());
+                /// ```
+                pub const W: Vec4<@t> = Vec4 { x: 0 as @t, y: 0 as @t, z: 0 as @t, w: 1 as @t };
+            }
+        }
+    }
+}
+
+vec4_consts!(f32, f64, i32, u32);
+
+// Component-wise; a scalar on the right applies to every component.
+
+impl<T: Scalar> Add for Vec4<T> {
+    type Output = Vec4<T>;
+    fn add(self, o: Vec4<T>) -> Vec4<T> { Vec4 { x: self.x + o.x, y: self.y + o.y, z: self.z + o.z, w: self.w + o.w } }
+}
+
+impl<T: Scalar> Add<T> for Vec4<T> {
+    type Output = Vec4<T>;
+    fn add(self, s: T) -> Vec4<T> { Vec4 { x: self.x + s, y: self.y + s, z: self.z + s, w: self.w + s } }
+}
+
+impl<T: Scalar> AddAssign for Vec4<T> {
+    fn add_assign(ref self, o: Vec4<T>) { self = self + o; }
+}
+
+impl<T: Scalar> AddAssign<T> for Vec4<T> {
+    fn add_assign(ref self, s: T) { self = self + s; }
+}
+
+impl<T: Scalar> Sub for Vec4<T> {
+    type Output = Vec4<T>;
+    fn sub(self, o: Vec4<T>) -> Vec4<T> { Vec4 { x: self.x - o.x, y: self.y - o.y, z: self.z - o.z, w: self.w - o.w } }
+}
+
+impl<T: Scalar> Sub<T> for Vec4<T> {
+    type Output = Vec4<T>;
+    fn sub(self, s: T) -> Vec4<T> { Vec4 { x: self.x - s, y: self.y - s, z: self.z - s, w: self.w - s } }
+}
+
+impl<T: Scalar> SubAssign for Vec4<T> {
+    fn sub_assign(ref self, o: Vec4<T>) { self = self - o; }
+}
+
+impl<T: Scalar> SubAssign<T> for Vec4<T> {
+    fn sub_assign(ref self, s: T) { self = self - s; }
+}
+
+impl<T: Scalar> Mul for Vec4<T> {
+    type Output = Vec4<T>;
+    fn mul(self, o: Vec4<T>) -> Vec4<T> { Vec4 { x: self.x * o.x, y: self.y * o.y, z: self.z * o.z, w: self.w * o.w } }
+}
+
+impl<T: Scalar> Mul<T> for Vec4<T> {
+    type Output = Vec4<T>;
+    fn mul(self, s: T) -> Vec4<T> { Vec4 { x: self.x * s, y: self.y * s, z: self.z * s, w: self.w * s } }
+}
+
+impl<T: Scalar> MulAssign for Vec4<T> {
+    fn mul_assign(ref self, o: Vec4<T>) { self = self * o; }
+}
+
+impl<T: Scalar> MulAssign<T> for Vec4<T> {
+    fn mul_assign(ref self, s: T) { self = self * s; }
+}
+
+impl<T: Scalar> Div for Vec4<T> {
+    type Output = Vec4<T>;
+    fn div(self, o: Vec4<T>) -> Vec4<T> { Vec4 { x: self.x / o.x, y: self.y / o.y, z: self.z / o.z, w: self.w / o.w } }
+}
+
+impl<T: Scalar> Div<T> for Vec4<T> {
+    type Output = Vec4<T>;
+    fn div(self, s: T) -> Vec4<T> { Vec4 { x: self.x / s, y: self.y / s, z: self.z / s, w: self.w / s } }
+}
+
+impl<T: Scalar> DivAssign for Vec4<T> {
+    fn div_assign(ref self, o: Vec4<T>) { self = self / o; }
+}
+
+impl<T: Scalar> DivAssign<T> for Vec4<T> {
+    fn div_assign(ref self, s: T) { self = self / s; }
+}
+
+impl<T: Scalar + Neg<Output = T>> Neg for Vec4<T> {
+    type Output = Vec4<T>;
+    fn neg(self) -> Vec4<T> { Vec4 { x: -self.x, y: -self.y, z: -self.z, w: -self.w } }
+}
+
+impl<T: Scalar> Index<usize> for Vec4<T> {
+    type Output = T;
+    /// Component `i`: 0 is `x`; past 3 panics.
+    #[track_caller]
+    fn index(self, i: usize) -> T {
+        match i {
+            0 => self.x,
+            1 => self.y,
+            2 => self.z,
+            3 => self.w,
+            _ => panic(f"Vec4 index {i} is out of range 0..4"),
+        }
+    }
+}
+
+/// `(x, y, z, w)`, each component as its `Display`.
+impl<T: Scalar> Display for Vec4<T> {
+    fn fmt(self, ref f: Formatter) throws (FmtError) {
+        try f.write_str("(");
+        try Display::fmt(self.x, ref f);
+        try f.write_str(", ");
+        try Display::fmt(self.y, ref f);
+        try f.write_str(", ");
+        try Display::fmt(self.z, ref f);
+        try f.write_str(", ");
+        try Display::fmt(self.w, ref f);
+        try f.write_str(")")
+    }
+}
+
+#[impl_macro(vec4_scalar_left)] @macro {
+    (@rep[sep = ","] { @t: ty }) => {
+        @for @t {
+            impl Mul<Vec4<@t>> for @t {
+                type Output = Vec4<@t>;
+                fn mul(self, v: Vec4<@t>) -> Vec4<@t> { v * self }
+            }
+        }
+    }
+}
+
+vec4_scalar_left!(f32, f64, i32, u32);

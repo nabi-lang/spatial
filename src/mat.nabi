@@ -1,0 +1,30 @@
+//! Square matrices of 2, 3 and 4 columns, stored column by column.
+
+pub(pkg) mod mat2;
+pub(pkg) mod mat3;
+pub(pkg) mod mat4;
+
+pub use mat2::Mat2;
+pub use mat3::Mat3;
+pub use mat4::Mat4;
+
+/// `Mat2<f64>`.
+///
+/// ```nabi
+/// assert(spatial::DMat2::IDENTITY.determinant() == 1.0);
+/// ```
+pub type DMat2 = Mat2<f64>;
+
+/// `Mat3<f64>`.
+///
+/// ```nabi
+/// assert(spatial::DMat3::IDENTITY.determinant() == 1.0);
+/// ```
+pub type DMat3 = Mat3<f64>;
+
+/// `Mat4<f64>`.
+///
+/// ```nabi
+/// assert(spatial::DMat4::IDENTITY.determinant() == 1.0);
+/// ```
+pub type DMat4 = Mat4<f64>;

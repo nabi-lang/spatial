@@ -1,0 +1,66 @@
+// Boxes, rays, planes, spheres.
+
+use pkg::tests::suite::{close, expect};
+use pkg::{Aabb, DMat4, DQuat, DVec3, Plane, Ray, Sphere, Vec3};
+
+#[test]
+fn boxes() {
+    let b = Aabb::new(Vec3::new(-1.0, 0.0, 2.0), Vec3::new(1.0, 4.0, 3.0));
+    expect(b.center() == Vec3::new(0.0, 2.0, 2.5) && b.size() == Vec3::new(2.0, 4.0, 1.0), "center, size");
+    expect(b.half_extents() == Vec3::new(1.0, 2.0, 0.5), "half extents");
+    expect(!b.is_empty() && Aabb::new(Vec3::ONE, Vec3::ZERO).is_empty(), "empty");
+    expect(b.contains(Vec3::new(0.0, 4.0, 2.0)) && !b.contains(Vec3::new(0.0, 4.1, 2.0)), "contains");
+    expect(b.intersects(Aabb::new(Vec3::new(1.0, 4.0, 3.0), Vec3::splat(9.0))), "touching");
+    expect(!b.intersects(Aabb::new(Vec3::new(1.1, 0.0, 2.0), Vec3::splat(9.0))), "apart");
+    expect(b.union(Aabb::new(Vec3::splat(5.0), Vec3::splat(6.0))).max == Vec3::splat(6.0), "union");
+    let nothing: List<Vec3> = [];
+    expect(Aabb::from_points(nothing) == none, "no points");
+    expect(b.closest_point(Vec3::new(5.0, 2.0, 2.5)) == Vec3::new(1.0, 2.0, 2.5), "closest");
+    // A rotated box's bounds contain every rotated corner.
+    let m = DMat4::from_quat(DQuat::from_rotation_z(0.7)) * DMat4::from_translation(DVec3::X);
+    let d = Aabb::new(DVec3::ZERO, DVec3::new(1.0, 2.0, 3.0));
+    let t = d.transform(m);
+    for i in 0..8 {
+        let c = DVec3::new(if i & 1 == 0 { 0.0 } else { 1.0 }, if i & 2 == 0 { 0.0 } else { 2.0 }, if i & 4 == 0 { 0.0 } else { 3.0 });
+        let p = m.transform_point(c);
+        expect(t.min.x <= p.x + 1e-12 && t.min.y <= p.y + 1e-12 && t.min.z <= p.z + 1e-12 && t.max.x >= p.x - 1e-12 && t.max.y >= p.y - 1e-12 && t.max.z >= p.z - 1e-12, f"corner {i} inside");
+    }
+}
+
+#[test]
+fn rays() {
+    let b = Aabb::new(Vec3::splat(-1.0), Vec3::ONE);
+    let r = Ray::new(Vec3::new(-3.0, 0.5, 0.0), Vec3::X);
+    expect(r.intersect_aabb(b) == 2.0, "box front");
+    expect(Ray::new(Vec3::ZERO, Vec3::Y).intersect_aabb(b) == 0.0, "box from inside");
+    expect(Ray::new(Vec3::new(3.0, 0.0, 0.0), Vec3::X).intersect_aabb(b) == none, "box behind");
+    expect(Ray::new(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)).at(2.0) == Vec3::new(-1.0, 0.0, 0.0), "at");
+    let s = Sphere::new(Vec3::new(0.0, 0.0, -10.0), 2.0);
+    expect(Ray::new(Vec3::ZERO, -Vec3::Z).intersect_sphere(s) == 8.0, "sphere");
+    expect(Ray::new(Vec3::ZERO, Vec3::Z).intersect_sphere(s) == none, "sphere behind");
+    expect(Ray::new(s.center, Vec3::X).intersect_sphere(s) == 0.0, "sphere from inside");
+    let ground = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
+    expect(Ray::new(Vec3::new(1.0, 3.0, 1.0), Vec3::new(0.0, -1.0, 0.0)).intersect_plane(ground) == 3.0, "plane");
+    expect(Ray::new(Vec3::ONE, Vec3::X).intersect_plane(ground) == none, "parallel");
+    expect(Ray::new(Vec3::ONE, Vec3::Y).intersect_plane(ground) == none, "away");
+}
+
+#[test]
+fn planes() {
+    let p = Plane::<f64>::from_points(DVec3::new(0.0, 0.0, 1.0), DVec3::new(1.0, 0.0, 1.0), DVec3::new(0.0, 1.0, 1.0));
+    expect(p.normal == DVec3::Z && p.d == -1.0, "from points");
+    close(p.distance(DVec3::new(5.0, 5.0, 3.0)), 2.0, 0.0, "distance");
+    expect(p.project(DVec3::new(5.0, 5.0, 3.0)) == DVec3::new(5.0, 5.0, 1.0), "project");
+    expect(Plane::from_vec4(p.to_vec4()) == p, "vec4 round trip");
+    expect(Plane::new(DVec3::new(0.0, 0.0, 4.0), -4.0).normalize() == p, "normalize");
+}
+
+#[test]
+fn spheres() {
+    let s = Sphere::new(Vec3::ZERO, 1.0);
+    expect(s.intersects(Sphere::new(Vec3::new(1.5, 0.0, 0.0), 0.5)), "touching spheres");
+    expect(!s.intersects(Sphere::new(Vec3::new(1.6, 0.0, 0.0), 0.5)), "apart");
+    expect(s.intersects_aabb(Aabb::new(Vec3::new(0.5, 0.5, 0.5), Vec3::splat(2.0))), "box corner inside");
+    expect(!s.intersects_aabb(Aabb::new(Vec3::new(0.8, 0.8, 0.8), Vec3::splat(2.0))), "box corner outside");
+    expect(s.aabb().size() == Vec3::splat(2.0), "aabb");
+}

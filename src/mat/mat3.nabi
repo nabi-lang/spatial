@@ -1,0 +1,437 @@
+//! `Mat3<T>`: a 3x3 matrix, a 3D rotation and scale or a 2D affine map.
+
+use pkg::euler::{EulerOrder, angles, axis_mat};
+use pkg::{Mat2, Mat4, Quat, Real, Vec2, Vec3};
+use core::ops::{Add, Mul, MulAssign, Sub};
+use core::reflect::Inspect;
+
+/// A 3x3 matrix of three column vectors: a rotation and scale in 3D, or
+/// a 2D transform in homogeneous coordinates (`transform_point2`).
+/// `Mat3` alone is `Mat3<f32>`. `#[repr(C)]`: `x_axis`, `y_axis`,
+/// `z_axis`, nine `T`s column by column. A WGSL `mat3x3<f32>` pads each
+/// column to 16 bytes: upload `Mat4::from_mat3(m)` or three `Vec3A`s.
+///
+/// ```nabi
+/// use spatial::{Mat3, Vec3};
+///
+/// let m = Mat3::from_rotation_z(f32::PI / 2.0);
+/// assert((m * Vec3::X).approx_eq(Vec3::Y, 1e-6));
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, Inspect)]
+#[cfg_attr(feature = "nabion", derive(Nabion))]
+pub struct Mat3<T = f32> {
+    pub x_axis: Vec3<T>;
+    pub y_axis: Vec3<T>;
+    pub z_axis: Vec3<T>;
+}
+
+impl<T: Real> Mat3<T> {
+    /// The matrix of its columns.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Vec3};
+    ///
+    /// assert(Mat3::from_cols(Vec3::X, Vec3::Y, Vec3::Z) == Mat3::IDENTITY);
+    /// ```
+    pub const fn from_cols(x_axis: Vec3<T>, y_axis: Vec3<T>, z_axis: Vec3<T>) -> Mat3<T> {
+        Mat3 { x_axis: x_axis, y_axis: y_axis, z_axis: z_axis }
+    }
+
+    /// From nine values, column by column.
+    ///
+    /// ```nabi
+    /// let m = spatial::DMat3::from_cols_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+    /// assert(m == spatial::DMat3::IDENTITY);
+    /// ```
+    pub fn from_cols_array(a: [T; 9]) -> Mat3<T> {
+        Mat3 {
+            x_axis: Vec3::new(a[0], a[1], a[2]),
+            y_axis: Vec3::new(a[3], a[4], a[5]),
+            z_axis: Vec3::new(a[6], a[7], a[8]),
+        }
+    }
+
+    /// The nine values column by column.
+    ///
+    /// ```nabi
+    /// assert(spatial::Mat3::IDENTITY.to_cols_array()[4] == 1.0);
+    /// ```
+    pub fn to_cols_array(self) -> [T; 9] {
+        let (x, y, z) = (self.x_axis, self.y_axis, self.z_axis);
+        [x.x, x.y, x.z, y.x, y.y, y.z, z.x, z.y, z.z]
+    }
+
+    /// The identity.
+    ///
+    /// ```nabi
+    /// assert(spatial::Mat3::<f32>::identity() == spatial::Mat3::IDENTITY);
+    /// ```
+    pub fn identity() -> Mat3<T> { Mat3 { x_axis: Vec3::unit_x(), y_axis: Vec3::unit_y(), z_axis: Vec3::unit_z() } }
+
+    /// All zero.
+    ///
+    /// ```nabi
+    /// assert(spatial::Mat3::<f32>::zero().determinant() == 0.0);
+    /// ```
+    pub fn zero() -> Mat3<T> { Mat3 { x_axis: Vec3::zero(), y_axis: Vec3::zero(), z_axis: Vec3::zero() } }
+
+    /// The diagonal matrix of `d`, a 3D scale.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Vec3};
+    ///
+    /// assert(Mat3::from_diagonal(Vec3::new(1.0, 2.0, 3.0)) * Vec3::ONE == Vec3::new(1.0, 2.0, 3.0));
+    /// ```
+    pub fn from_diagonal(d: Vec3<T>) -> Mat3<T> {
+        let o = T::zero();
+        Mat3 { x_axis: Vec3::new(d.x, o, o), y_axis: Vec3::new(o, d.y, o), z_axis: Vec3::new(o, o, d.z) }
+    }
+
+    /// The rotation of a unit quaternion.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Quat, Vec3};
+    ///
+    /// let q = Quat::from_rotation_y(0.5);
+    /// assert((Mat3::from_quat(q) * Vec3::X).approx_eq(q * Vec3::X, 1e-6));
+    /// ```
+    pub fn from_quat(q: Quat<T>) -> Mat3<T> {
+        let two = T::from_f64(2.0);
+        let one = T::one();
+        let (x2, y2, z2) = (q.x * two, q.y * two, q.z * two);
+        let (xx, xy, xz) = (q.x * x2, q.x * y2, q.x * z2);
+        let (yy, yz, zz) = (q.y * y2, q.y * z2, q.z * z2);
+        let (wx, wy, wz) = (q.w * x2, q.w * y2, q.w * z2);
+        Mat3 {
+            x_axis: Vec3::new(one - (yy + zz), xy + wz, xz - wy),
+            y_axis: Vec3::new(xy - wz, one - (xx + zz), yz + wx),
+            z_axis: Vec3::new(xz + wy, yz - wx, one - (xx + yy)),
+        }
+    }
+
+    /// The rotation by `angle` radians about the unit vector `axis`.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Vec3};
+    ///
+    /// assert((Mat3::from_axis_angle(Vec3::X, f32::PI / 2.0) * Vec3::Y).approx_eq(Vec3::Z, 1e-6));
+    /// ```
+    pub fn from_axis_angle(axis: Vec3<T>, angle: T) -> Mat3<T> {
+        let (s, c) = (angle.sin(), angle.cos());
+        let t = T::one() - c;
+        let (x, y, z) = (axis.x, axis.y, axis.z);
+        Mat3 {
+            x_axis: Vec3::new(t * x * x + c, t * x * y + s * z, t * x * z - s * y),
+            y_axis: Vec3::new(t * x * y - s * z, t * y * y + c, t * y * z + s * x),
+            z_axis: Vec3::new(t * x * z + s * y, t * y * z - s * x, t * z * z + c),
+        }
+    }
+
+    /// The rotation by `angle` radians about +x.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Vec3};
+    ///
+    /// assert((Mat3::from_rotation_x(f32::PI / 2.0) * Vec3::Y).approx_eq(Vec3::Z, 1e-6));
+    /// ```
+    pub fn from_rotation_x(angle: T) -> Mat3<T> {
+        let (s, c) = (angle.sin(), angle.cos());
+        let (o, l) = (T::zero(), T::one());
+        Mat3 { x_axis: Vec3::new(l, o, o), y_axis: Vec3::new(o, c, s), z_axis: Vec3::new(o, -s, c) }
+    }
+
+    /// The rotation by `angle` radians about +y.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Vec3};
+    ///
+    /// assert((Mat3::from_rotation_y(f32::PI / 2.0) * Vec3::Z).approx_eq(Vec3::X, 1e-6));
+    /// ```
+    pub fn from_rotation_y(angle: T) -> Mat3<T> {
+        let (s, c) = (angle.sin(), angle.cos());
+        let (o, l) = (T::zero(), T::one());
+        Mat3 { x_axis: Vec3::new(c, o, -s), y_axis: Vec3::new(o, l, o), z_axis: Vec3::new(s, o, c) }
+    }
+
+    /// The rotation by `angle` radians about +z.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Vec3};
+    ///
+    /// assert((Mat3::from_rotation_z(f32::PI / 2.0) * Vec3::X).approx_eq(Vec3::Y, 1e-6));
+    /// ```
+    pub fn from_rotation_z(angle: T) -> Mat3<T> {
+        let (s, c) = (angle.sin(), angle.cos());
+        let (o, l) = (T::zero(), T::one());
+        Mat3 { x_axis: Vec3::new(c, s, o), y_axis: Vec3::new(-s, c, o), z_axis: Vec3::new(o, o, l) }
+    }
+
+    /// The rotation of Euler angles in radians: see `EulerOrder`.
+    ///
+    /// ```nabi
+    /// use spatial::{EulerOrder, Mat3};
+    ///
+    /// let m = Mat3::from_euler(EulerOrder::ZYX, 0.0, 0.0, 0.5);
+    /// assert(m.approx_eq(Mat3::from_rotation_x(0.5), 1e-6));
+    /// ```
+    pub fn from_euler(order: EulerOrder, a: T, b: T, c: T) -> Mat3<T> {
+        let (i, j, k) = order.axes();
+        axis_mat(i, a) * axis_mat(j, b) * axis_mat(k, c)
+    }
+
+    /// The Euler angles of a rotation matrix: see `Quat::to_euler`.
+    ///
+    /// ```nabi
+    /// use spatial::{EulerOrder, Mat3};
+    ///
+    /// let (a, b, c) = Mat3::<f64>::from_rotation_y(0.25).to_euler(EulerOrder::YXZ);
+    /// assert((a - 0.25).abs() < 1e-12 && b.abs() < 1e-12 && c.abs() < 1e-12);
+    /// ```
+    pub fn to_euler(self, order: EulerOrder) -> (T, T, T) { angles(self, order) }
+
+    /// The upper-left 3x3 of `m`: its rotation and scale.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Mat4, Vec3};
+    ///
+    /// assert(Mat3::from_mat4(Mat4::from_translation(Vec3::ONE)) == Mat3::IDENTITY);
+    /// ```
+    pub fn from_mat4(m: Mat4<T>) -> Mat3<T> {
+        Mat3 { x_axis: m.x_axis.xyz(), y_axis: m.y_axis.xyz(), z_axis: m.z_axis.xyz() }
+    }
+
+    /// `m` as the upper-left 2x2, 1 in the corner: a 2D linear map in
+    /// homogeneous coordinates.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat2, Mat3};
+    ///
+    /// assert(Mat3::from_mat2(Mat2::IDENTITY) == Mat3::IDENTITY);
+    /// ```
+    pub fn from_mat2(m: Mat2<T>) -> Mat3<T> {
+        Mat3 { x_axis: m.x_axis.extend(T::zero()), y_axis: m.y_axis.extend(T::zero()), z_axis: Vec3::unit_z() }
+    }
+
+    /// The 2D translation by `t`, in homogeneous coordinates.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Vec2};
+    ///
+    /// assert(Mat3::from_translation(Vec2::new(1.0, 2.0)).transform_point2(Vec2::ZERO) == Vec2::new(1.0, 2.0));
+    /// ```
+    pub fn from_translation(t: Vec2<T>) -> Mat3<T> {
+        Mat3 { x_axis: Vec3::unit_x(), y_axis: Vec3::unit_y(), z_axis: t.extend(T::one()) }
+    }
+
+    /// The 2D transform that scales by `scale`, rotates by `angle`
+    /// radians, then moves by `t`.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Vec2};
+    ///
+    /// let m = Mat3::from_scale_angle_translation(Vec2::splat(2.0), f32::PI / 2.0, Vec2::new(1.0, 0.0));
+    /// assert(m.transform_point2(Vec2::X).approx_eq(Vec2::new(1.0, 2.0), 1e-6));
+    /// ```
+    pub fn from_scale_angle_translation(scale: Vec2<T>, angle: T, t: Vec2<T>) -> Mat3<T> {
+        let m = Mat3::from_mat2(Mat2::from_scale_angle(scale, angle));
+        Mat3 { x_axis: m.x_axis, y_axis: m.y_axis, z_axis: t.extend(T::one()) }
+    }
+
+    /// The 2D point `p` transformed, translation included (`z = 1`, no
+    /// perspective divide).
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Vec2};
+    ///
+    /// assert(Mat3::from_translation(Vec2::X).transform_point2(Vec2::Y) == Vec2::ONE);
+    /// ```
+    pub fn transform_point2(self, p: Vec2<T>) -> Vec2<T> {
+        (self.x_axis * p.x + self.y_axis * p.y + self.z_axis).xy()
+    }
+
+    /// The 2D direction `v` transformed, translation left out (`z = 0`).
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Vec2};
+    ///
+    /// assert(Mat3::from_translation(Vec2::X).transform_vector2(Vec2::Y) == Vec2::Y);
+    /// ```
+    pub fn transform_vector2(self, v: Vec2<T>) -> Vec2<T> { (self.x_axis * v.x + self.y_axis * v.y).xy() }
+
+    /// Column `i` (0, 1 or 2).
+    ///
+    /// ```nabi
+    /// assert(spatial::Mat3::IDENTITY.col(2) == spatial::Vec3::Z);
+    /// ```
+    #[track_caller]
+    pub fn col(self, i: usize) -> Vec3<T> {
+        match i {
+            0 => self.x_axis,
+            1 => self.y_axis,
+            2 => self.z_axis,
+            _ => panic(f"Mat3 column {i} is out of range 0..3"),
+        }
+    }
+
+    /// Row `i` (0, 1 or 2).
+    ///
+    /// ```nabi
+    /// assert(spatial::Mat3::IDENTITY.row(0) == spatial::Vec3::X);
+    /// ```
+    pub fn row(self, i: usize) -> Vec3<T> { Vec3::new(self.x_axis[i], self.y_axis[i], self.z_axis[i]) }
+
+    /// The transpose; the inverse of a rotation.
+    ///
+    /// ```nabi
+    /// use spatial::DMat3;
+    ///
+    /// let r = DMat3::from_rotation_x(0.3);
+    /// assert((r * r.transpose()).approx_eq(DMat3::IDENTITY, 1e-12));
+    /// ```
+    pub fn transpose(self) -> Mat3<T> { Mat3 { x_axis: self.row(0), y_axis: self.row(1), z_axis: self.row(2) } }
+
+    /// The determinant, `x_axis . (y_axis x z_axis)`.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Vec3};
+    ///
+    /// assert(Mat3::from_diagonal(Vec3::new(1.0, 2.0, 3.0)).determinant() == 6.0);
+    /// ```
+    pub fn determinant(self) -> T { self.x_axis.dot(self.y_axis.cross(self.z_axis)) }
+
+    /// The inverse. A singular matrix gives infinite or NaN entries;
+    /// `try_inverse` gives `none` for it instead.
+    ///
+    /// ```nabi
+    /// use spatial::{DMat3, DVec3};
+    ///
+    /// let m = DMat3::from_cols(DVec3::new(2.0, 0.0, 1.0), DVec3::new(0.0, 1.0, 0.0), DVec3::new(1.0, 0.0, 3.0));
+    /// assert((m.inverse() * m).approx_eq(DMat3::IDENTITY, 1e-12));
+    /// ```
+    pub fn inverse(self) -> Mat3<T> {
+        let r0 = self.y_axis.cross(self.z_axis);
+        let r1 = self.z_axis.cross(self.x_axis);
+        let r2 = self.x_axis.cross(self.y_axis);
+        let inv_det = T::one() / self.x_axis.dot(r0);
+        Mat3 { x_axis: r0, y_axis: r1, z_axis: r2 }.transpose() * inv_det
+    }
+
+    /// The inverse, or `none` when the determinant is zero or the
+    /// result is not finite.
+    ///
+    /// ```nabi
+    /// assert(spatial::Mat3::<f32>::zero().try_inverse() == none);
+    /// ```
+    pub fn try_inverse(self) -> Mat3<T> | none {
+        let inv = self.inverse();
+        if self.determinant() != T::zero() && inv.is_finite() { inv } else { none }
+    }
+
+    /// The vector `v` transformed, the same as `self * v`.
+    ///
+    /// ```nabi
+    /// use spatial::{Mat3, Vec3};
+    ///
+    /// assert(Mat3::IDENTITY.transform_vector(Vec3::ONE) == Vec3::ONE);
+    /// ```
+    pub fn transform_vector(self, v: Vec3<T>) -> Vec3<T> { self.x_axis * v.x + self.y_axis * v.y + self.z_axis * v.z }
+
+    /// Whether every entry is within `eps` of `o`'s.
+    ///
+    /// ```nabi
+    /// use spatial::Mat3;
+    ///
+    /// assert(Mat3::IDENTITY.approx_eq(Mat3::from_rotation_z(1e-7), 1e-6));
+    /// ```
+    pub fn approx_eq(self, o: Mat3<T>, eps: T) -> bool {
+        self.x_axis.approx_eq(o.x_axis, eps) && self.y_axis.approx_eq(o.y_axis, eps) && self.z_axis.approx_eq(o.z_axis, eps)
+    }
+
+    /// Whether no entry is NaN or infinite.
+    ///
+    /// ```nabi
+    /// assert(spatial::Mat3::IDENTITY.is_finite());
+    /// ```
+    pub fn is_finite(self) -> bool { self.x_axis.is_finite() && self.y_axis.is_finite() && self.z_axis.is_finite() }
+}
+
+#[impl_macro(mat3_consts)] @macro {
+    (@rep[sep = ","] { @t: ty }) => {
+        @for @t {
+            impl Mat3<@t> {
+                /// The identity.
+                ///
+                /// ```nabi
+                /// assert(spatial::Mat3::IDENTITY.determinant() == 1.0);
+                /// ```
+                pub const IDENTITY: Mat3<@t> = Mat3 {
+                    x_axis: Vec3 { x: 1.0, y: 0.0, z: 0.0 },
+                    y_axis: Vec3 { x: 0.0, y: 1.0, z: 0.0 },
+                    z_axis: Vec3 { x: 0.0, y: 0.0, z: 1.0 },
+                };
+                /// All zero.
+                ///
+                /// ```nabi
+                /// assert(spatial::Mat3::ZERO == spatial::Mat3::zero());
+                /// ```
+                pub const ZERO: Mat3<@t> = Mat3 {
+                    x_axis: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                    y_axis: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                    z_axis: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                };
+            }
+        }
+    }
+}
+
+mat3_consts!(f32, f64);
+
+/// `a * b` applies `b` first.
+impl<T: Real> Mul for Mat3<T> {
+    type Output = Mat3<T>;
+    fn mul(self, o: Mat3<T>) -> Mat3<T> {
+        Mat3 { x_axis: self * o.x_axis, y_axis: self * o.y_axis, z_axis: self * o.z_axis }
+    }
+}
+
+impl<T: Real> Mul<Vec3<T>> for Mat3<T> {
+    type Output = Vec3<T>;
+    fn mul(self, v: Vec3<T>) -> Vec3<T> { self.transform_vector(v) }
+}
+
+impl<T: Real> Mul<T> for Mat3<T> {
+    type Output = Mat3<T>;
+    fn mul(self, s: T) -> Mat3<T> { Mat3 { x_axis: self.x_axis * s, y_axis: self.y_axis * s, z_axis: self.z_axis * s } }
+}
+
+impl<T: Real> Add for Mat3<T> {
+    type Output = Mat3<T>;
+    fn add(self, o: Mat3<T>) -> Mat3<T> {
+        Mat3 { x_axis: self.x_axis + o.x_axis, y_axis: self.y_axis + o.y_axis, z_axis: self.z_axis + o.z_axis }
+    }
+}
+
+impl<T: Real> Sub for Mat3<T> {
+    type Output = Mat3<T>;
+    fn sub(self, o: Mat3<T>) -> Mat3<T> {
+        Mat3 { x_axis: self.x_axis - o.x_axis, y_axis: self.y_axis - o.y_axis, z_axis: self.z_axis - o.z_axis }
+    }
+}
+
+impl<T: Real> MulAssign for Mat3<T> {
+    fn mul_assign(ref self, o: Mat3<T>) { self = self * o; }
+}
+
+/// `[x_axis, y_axis, z_axis]`, the columns.
+impl<T: Real> Display for Mat3<T> {
+    fn fmt(self, ref f: Formatter) throws (FmtError) {
+        try f.write_str("[");
+        try Display::fmt(self.x_axis, ref f);
+        try f.write_str(", ");
+        try Display::fmt(self.y_axis, ref f);
+        try f.write_str(", ");
+        try Display::fmt(self.z_axis, ref f);
+        try f.write_str("]")
+    }
+}

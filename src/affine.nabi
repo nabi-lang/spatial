@@ -1,0 +1,335 @@
+//! `Affine2<T>` and `Affine3<T>`: a linear map plus a translation.
+
+use pkg::{Mat2, Mat3, Mat4, Quat, Real, Vec2, Vec3};
+use core::ops::Mul;
+use core::reflect::Inspect;
+
+/// A 2D affine transform: `matrix * p + translation`. Smaller and
+/// cheaper than a `Mat3` with a fixed last row. `#[repr(C)]`: the
+/// `Mat2` then the `Vec2`, six `T`s.
+///
+/// ```nabi
+/// use spatial::{Affine2, Vec2};
+///
+/// let a = Affine2::from_scale_angle_translation(Vec2::ONE, f32::PI / 2.0, Vec2::new(1.0, 0.0));
+/// assert(a.transform_point(Vec2::X).approx_eq(Vec2::new(1.0, 1.0), 1e-6));
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, Inspect)]
+#[cfg_attr(feature = "nabion", derive(Nabion))]
+pub struct Affine2<T = f32> {
+    pub matrix: Mat2<T>;
+    pub translation: Vec2<T>;
+}
+
+/// `Affine2<f64>`.
+///
+/// ```nabi
+/// assert(spatial::DAffine2::identity().translation == spatial::DVec2::ZERO);
+/// ```
+pub type DAffine2 = Affine2<f64>;
+
+impl<T: Real> Affine2<T> {
+    /// The transform of a matrix and a translation.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine2, Mat2, Vec2};
+    ///
+    /// assert(Affine2::new(Mat2::IDENTITY, Vec2::ZERO) == Affine2::identity());
+    /// ```
+    pub const fn new(matrix: Mat2<T>, translation: Vec2<T>) -> Affine2<T> { Affine2 { matrix: matrix, translation: translation } }
+
+    /// No change.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine2, Vec2};
+    ///
+    /// assert(Affine2::identity().transform_point(Vec2::ONE) == Vec2::ONE);
+    /// ```
+    pub fn identity() -> Affine2<T> { Affine2 { matrix: Mat2::identity(), translation: Vec2::zero() } }
+
+    /// The translation by `t`.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine2, Vec2};
+    ///
+    /// assert(Affine2::from_translation(Vec2::X).transform_point(Vec2::ZERO) == Vec2::X);
+    /// ```
+    pub fn from_translation(t: Vec2<T>) -> Affine2<T> { Affine2 { matrix: Mat2::identity(), translation: t } }
+
+    /// The scale by `s`.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine2, Vec2};
+    ///
+    /// assert(Affine2::from_scale(Vec2::splat(2.0)).transform_point(Vec2::ONE) == Vec2::splat(2.0));
+    /// ```
+    pub fn from_scale(s: Vec2<T>) -> Affine2<T> { Affine2 { matrix: Mat2::from_diagonal(s), translation: Vec2::zero() } }
+
+    /// The counterclockwise rotation by `angle` radians.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine2, Vec2};
+    ///
+    /// assert(Affine2::from_angle(f32::PI).transform_point(Vec2::X).approx_eq(-Vec2::X, 1e-6));
+    /// ```
+    pub fn from_angle(angle: T) -> Affine2<T> { Affine2 { matrix: Mat2::from_angle(angle), translation: Vec2::zero() } }
+
+    /// Scale, rotate by `angle` radians, then move by `t`.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine2, Vec2};
+    ///
+    /// let a = Affine2::from_scale_angle_translation(Vec2::splat(3.0), 0.0, Vec2::Y);
+    /// assert(a.transform_point(Vec2::X) == Vec2::new(3.0, 1.0));
+    /// ```
+    pub fn from_scale_angle_translation(scale: Vec2<T>, angle: T, t: Vec2<T>) -> Affine2<T> {
+        Affine2 { matrix: Mat2::from_scale_angle(scale, angle), translation: t }
+    }
+
+    /// The affine part of a 2D homogeneous `Mat3` (its last row ignored).
+    ///
+    /// ```nabi
+    /// use spatial::{Affine2, Mat3, Vec2};
+    ///
+    /// assert(Affine2::from_mat3(Mat3::from_translation(Vec2::X)) == Affine2::from_translation(Vec2::X));
+    /// ```
+    pub fn from_mat3(m: Mat3<T>) -> Affine2<T> {
+        Affine2 { matrix: Mat2::from_cols(m.x_axis.xy(), m.y_axis.xy()), translation: m.z_axis.xy() }
+    }
+
+    /// The same transform as a homogeneous `Mat3`.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine2, Mat3};
+    ///
+    /// assert(Affine2::<f32>::identity().to_mat3() == Mat3::IDENTITY);
+    /// ```
+    pub fn to_mat3(self) -> Mat3<T> {
+        Mat3::from_cols(self.matrix.x_axis.extend(T::zero()), self.matrix.y_axis.extend(T::zero()), self.translation.extend(T::one()))
+    }
+
+    /// The point `p` transformed.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine2, Vec2};
+    ///
+    /// assert(Affine2::from_translation(Vec2::X).transform_point(Vec2::Y) == Vec2::ONE);
+    /// ```
+    pub fn transform_point(self, p: Vec2<T>) -> Vec2<T> { self.matrix * p + self.translation }
+
+    /// The direction `v` transformed, translation left out.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine2, Vec2};
+    ///
+    /// assert(Affine2::from_translation(Vec2::X).transform_vector(Vec2::Y) == Vec2::Y);
+    /// ```
+    pub fn transform_vector(self, v: Vec2<T>) -> Vec2<T> { self.matrix * v }
+
+    /// The inverse transform. A singular matrix gives infinite or NaN
+    /// entries.
+    ///
+    /// ```nabi
+    /// use spatial::{DAffine2, DVec2};
+    ///
+    /// let a = DAffine2::from_scale_angle_translation(DVec2::splat(2.0), 0.5, DVec2::ONE);
+    /// assert((a * a.inverse()).transform_point(DVec2::X).approx_eq(DVec2::X, 1e-12));
+    /// ```
+    pub fn inverse(self) -> Affine2<T> {
+        let m = self.matrix.inverse();
+        Affine2 { matrix: m, translation: -(m * self.translation) }
+    }
+
+    /// Whether the matrix and translation are within `eps` of `o`'s.
+    ///
+    /// ```nabi
+    /// use spatial::Affine2;
+    ///
+    /// assert(Affine2::identity().approx_eq(Affine2::from_angle(1e-7), 1e-6));
+    /// ```
+    pub fn approx_eq(self, o: Affine2<T>, eps: T) -> bool {
+        self.matrix.approx_eq(o.matrix, eps) && self.translation.approx_eq(o.translation, eps)
+    }
+}
+
+/// `a * b` applies `b` first.
+impl<T: Real> Mul for Affine2<T> {
+    type Output = Affine2<T>;
+    fn mul(self, o: Affine2<T>) -> Affine2<T> {
+        Affine2 { matrix: self.matrix * o.matrix, translation: self.matrix * o.translation + self.translation }
+    }
+}
+
+/// A 3D affine transform: `matrix * p + translation`, any mix of
+/// rotation, scale, shear and translation without the projective row of
+/// a `Mat4`. `#[repr(C)]`: the `Mat3` then the `Vec3`, twelve `T`s.
+///
+/// ```nabi
+/// use spatial::{Affine3, Quat, Vec3};
+///
+/// let a = Affine3::from_scale_rotation_translation(Vec3::ONE, Quat::from_rotation_y(f32::PI / 2.0), Vec3::Y);
+/// assert(a.transform_point(Vec3::Z).approx_eq(Vec3::new(1.0, 1.0, 0.0), 1e-6));
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, Inspect)]
+#[cfg_attr(feature = "nabion", derive(Nabion))]
+pub struct Affine3<T = f32> {
+    pub matrix: Mat3<T>;
+    pub translation: Vec3<T>;
+}
+
+/// `Affine3<f64>`.
+///
+/// ```nabi
+/// assert(spatial::DAffine3::identity().translation == spatial::DVec3::ZERO);
+/// ```
+pub type DAffine3 = Affine3<f64>;
+
+impl<T: Real> Affine3<T> {
+    /// The transform of a matrix and a translation.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Mat3, Vec3};
+    ///
+    /// assert(Affine3::new(Mat3::IDENTITY, Vec3::ZERO) == Affine3::identity());
+    /// ```
+    pub const fn new(matrix: Mat3<T>, translation: Vec3<T>) -> Affine3<T> { Affine3 { matrix: matrix, translation: translation } }
+
+    /// No change.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Vec3};
+    ///
+    /// assert(Affine3::identity().transform_point(Vec3::ONE) == Vec3::ONE);
+    /// ```
+    pub fn identity() -> Affine3<T> { Affine3 { matrix: Mat3::identity(), translation: Vec3::zero() } }
+
+    /// The translation by `t`.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Vec3};
+    ///
+    /// assert(Affine3::from_translation(Vec3::X).transform_point(Vec3::ZERO) == Vec3::X);
+    /// ```
+    pub fn from_translation(t: Vec3<T>) -> Affine3<T> { Affine3 { matrix: Mat3::identity(), translation: t } }
+
+    /// The scale by `s`.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Vec3};
+    ///
+    /// assert(Affine3::from_scale(Vec3::splat(2.0)).transform_point(Vec3::ONE) == Vec3::splat(2.0));
+    /// ```
+    pub fn from_scale(s: Vec3<T>) -> Affine3<T> { Affine3 { matrix: Mat3::from_diagonal(s), translation: Vec3::zero() } }
+
+    /// The rotation of a unit quaternion.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Quat, Vec3};
+    ///
+    /// let q = Quat::from_rotation_z(0.3);
+    /// assert(Affine3::from_quat(q).transform_point(Vec3::X).approx_eq(q * Vec3::X, 1e-6));
+    /// ```
+    pub fn from_quat(q: Quat<T>) -> Affine3<T> { Affine3 { matrix: Mat3::from_quat(q), translation: Vec3::zero() } }
+
+    /// The rotation by `angle` radians about the unit vector `axis`.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Vec3};
+    ///
+    /// let a = Affine3::from_axis_angle(Vec3::Z, f32::PI / 2.0);
+    /// assert(a.transform_point(Vec3::X).approx_eq(Vec3::Y, 1e-6));
+    /// ```
+    pub fn from_axis_angle(axis: Vec3<T>, angle: T) -> Affine3<T> {
+        Affine3 { matrix: Mat3::from_axis_angle(axis, angle), translation: Vec3::zero() }
+    }
+
+    /// Scale, rotate, then move.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Quat, Vec3};
+    ///
+    /// let a = Affine3::from_scale_rotation_translation(Vec3::splat(2.0), Quat::IDENTITY, Vec3::X);
+    /// assert(a.transform_point(Vec3::ONE) == Vec3::new(3.0, 2.0, 2.0));
+    /// ```
+    pub fn from_scale_rotation_translation(scale: Vec3<T>, rotation: Quat<T>, translation: Vec3<T>) -> Affine3<T> {
+        let r = Mat3::from_quat(rotation);
+        Affine3 {
+            matrix: Mat3::from_cols(r.x_axis * scale.x, r.y_axis * scale.y, r.z_axis * scale.z),
+            translation: translation,
+        }
+    }
+
+    /// The affine part of `m` (its last row ignored).
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Mat4, Vec3};
+    ///
+    /// assert(Affine3::from_mat4(Mat4::from_translation(Vec3::X)) == Affine3::from_translation(Vec3::X));
+    /// ```
+    pub fn from_mat4(m: Mat4<T>) -> Affine3<T> { Affine3 { matrix: Mat3::from_mat4(m), translation: m.w_axis.xyz() } }
+
+    /// The same transform as a `Mat4`.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Mat4};
+    ///
+    /// assert(Affine3::<f32>::identity().to_mat4() == Mat4::IDENTITY);
+    /// ```
+    pub fn to_mat4(self) -> Mat4<T> {
+        let m = Mat4::from_mat3(self.matrix);
+        Mat4::from_cols(m.x_axis, m.y_axis, m.z_axis, self.translation.extend(T::one()))
+    }
+
+    /// The point `p` transformed.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Vec3};
+    ///
+    /// assert(Affine3::from_translation(Vec3::X).transform_point(Vec3::Y) == Vec3::new(1.0, 1.0, 0.0));
+    /// ```
+    pub fn transform_point(self, p: Vec3<T>) -> Vec3<T> { self.matrix * p + self.translation }
+
+    /// The direction `v` transformed, translation left out.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Vec3};
+    ///
+    /// assert(Affine3::from_translation(Vec3::X).transform_vector(Vec3::Y) == Vec3::Y);
+    /// ```
+    pub fn transform_vector(self, v: Vec3<T>) -> Vec3<T> { self.matrix * v }
+
+    /// The inverse transform. A singular matrix gives infinite or NaN
+    /// entries.
+    ///
+    /// ```nabi
+    /// use spatial::{DAffine3, DQuat, DVec3};
+    ///
+    /// let a = DAffine3::from_scale_rotation_translation(DVec3::splat(2.0), DQuat::from_rotation_x(1.0), DVec3::ONE);
+    /// assert((a.inverse() * a).approx_eq(DAffine3::identity(), 1e-12));
+    /// ```
+    pub fn inverse(self) -> Affine3<T> {
+        let m = self.matrix.inverse();
+        Affine3 { matrix: m, translation: -(m * self.translation) }
+    }
+
+    /// Whether the matrix and translation are within `eps` of `o`'s.
+    ///
+    /// ```nabi
+    /// use spatial::{Affine3, Vec3};
+    ///
+    /// assert(Affine3::identity().approx_eq(Affine3::from_translation(Vec3::splat(1e-7)), 1e-6));
+    /// ```
+    pub fn approx_eq(self, o: Affine3<T>, eps: T) -> bool {
+        self.matrix.approx_eq(o.matrix, eps) && self.translation.approx_eq(o.translation, eps)
+    }
+}
+
+/// `a * b` applies `b` first.
+impl<T: Real> Mul for Affine3<T> {
+    type Output = Affine3<T>;
+    fn mul(self, o: Affine3<T>) -> Affine3<T> {
+        Affine3 { matrix: self.matrix * o.matrix, translation: self.matrix * o.translation + self.translation }
+    }
+}

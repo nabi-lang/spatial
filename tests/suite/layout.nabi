@@ -1,0 +1,41 @@
+// Sizes and alignments for GPU buffers and C, and reflection.
+
+use pkg::tests::suite::expect;
+use pkg::{Aabb, Affine2, Affine3, DMat4, DVec3, DVec3A, EulerOrder, IVec4, Mat2, Mat3, Mat4, Plane, Quat, Ray, Sphere, Transform, UVec2, Vec2, Vec3, Vec3A, Vec4};
+
+#[test]
+fn sizes() {
+    expect(Vec2::<f32>::size() == 8 && Vec2::<f32>::align() == 4, "vec2");
+    expect(Vec3::<f32>::size() == 12 && Vec3::<f32>::align() == 4, "vec3");
+    expect(Vec4::<f32>::size() == 16, "vec4");
+    expect(Vec3A::<f32>::size() == 16 && Vec3A::<f32>::align() == 16, "vec3a");
+    expect(DVec3A::size() == 32, "dvec3a");
+    expect(DVec3::size() == 24 && IVec4::size() == 16 && UVec2::size() == 8, "other elements");
+    expect(Quat::<f32>::size() == 16, "quat");
+    expect(Mat2::<f32>::size() == 16 && Mat3::<f32>::size() == 36 && Mat4::<f32>::size() == 64, "matrices");
+    expect(DMat4::size() == 128, "dmat4");
+    expect(Affine2::<f32>::size() == 24 && Affine3::<f32>::size() == 48, "affine");
+    expect(Transform::<f32>::size() == 40, "transform");
+    expect(Aabb::new(Vec3::ZERO, Vec3::ONE).size_of_val() == 24 && Ray::<f32>::size() == 24 && Plane::<f32>::size() == 16 && Sphere::<f32>::size() == 16, "shapes");
+}
+
+#[test]
+fn column_order() {
+    // Column by column, as GLSL, WGSL and glTF store a mat4.
+    let m = Mat4::from_translation(Vec3::new(7.0, 8.0, 9.0));
+    let a = m.to_cols_array();
+    expect(a[12] == 7.0 && a[13] == 8.0 && a[14] == 9.0 && a[15] == 1.0, "translation in the last column");
+}
+
+#[test]
+fn inspect() {
+    expect(Vec3::<f32>::field_names() == ["x", "y", "z"], "vec3 fields");
+    expect(Transform::<f32>::field_names() == ["translation", "rotation", "scale"], "transform fields");
+    let v = Vec3::new(1.0f32, 2.0, 3.0);
+    let y = core::reflect::cast::<f32>(v.get_field("y") ?? panic("no field y"));
+    expect(y == 2.0, "get_field y");
+    let w = v;
+    expect(w.set_field("z", 9.0f32) && w.z == 9.0, "set_field");
+    expect(Mat4::<f32>::field_names() == ["x_axis", "y_axis", "z_axis", "w_axis"], "mat4 fields");
+    expect(EulerOrder::variant_names().len() == 6, "euler variants");
+}

@@ -1,0 +1,16 @@
+Package {
+    name: "spatial",
+    version: "0.1.0",
+    nabi_version: "0.1.0",
+    toolchain: "0.1",
+    description: "Game and graphics math: Vec2/3/4, Quat, Mat2/3/4, affine transforms, projections and shapes, generic over f32 and f64",
+    license: "MIT OR Apache-2.0",
+    repository: "https://github.com/nabi-lang/spatial",
+    keywords: ["vector", "matrix", "quaternion", "gamedev", "graphics"],
+    categories: ["mathematics", "game-development", "graphics"],
+    deps: {},
+    features: {
+        "default": [],
+        "nabion": [],
+    },
+}

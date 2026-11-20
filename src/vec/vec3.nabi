@@ -1,0 +1,818 @@
+//! `Vec3<T>`: 3 components, `x`, `y`, `z`, of a `Scalar`.
+
+use pkg::vec::{Vec2, Vec4};
+use pkg::{Real, Scalar};
+use core::index::Index;
+use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use core::reflect::Inspect;
+
+/// A 3-component vector. `Vec3` alone is `Vec3<f32>`; `DVec3`,
+/// `IVec3` and `UVec3` are the `f64`, `i32` and `u32` forms.
+/// `#[repr(C)]`: three `T`s in order, no padding; `Vec3` (f32) is 12
+/// bytes, aligned to 4. A GPU uniform or storage buffer aligns a `vec3` to
+/// 16 bytes: use `Vec3A` there, or follow each `Vec3` with a scalar.
+///
+/// ```nabi
+/// use spatial::Vec3;
+///
+/// let v = Vec3::new(1.0, 2.0, 3.0);
+/// assert(v.x == 1.0 && v.y == 2.0);
+/// assert(Vec3::<f32>::size() == 12);
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, Inspect)]
+#[cfg_attr(feature = "nabion", derive(Nabion))]
+pub struct Vec3<T = f32> {
+    pub x: T;
+    pub y: T;
+    pub z: T;
+}
+
+impl<T: Scalar> Vec3<T> {
+    /// The vector of its components.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).z == 3.0);
+    /// ```
+    pub const fn new(x: T, y: T, z: T) -> Vec3<T> {
+        Vec3 { x: x, y: y, z: z }
+    }
+
+    /// Every component `v`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::splat(2.0) == Vec3::new(2.0, 2.0, 2.0));
+    /// ```
+    pub const fn splat(v: T) -> Vec3<T> {
+        Vec3 { x: v, y: v, z: v }
+    }
+
+    /// All zero.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::zero() == Vec3::splat(0.0));
+    /// ```
+    pub fn zero() -> Vec3<T> {
+        Vec3::splat(T::zero())
+    }
+
+    /// All one.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::one() == Vec3::splat(1.0));
+    /// ```
+    pub fn one() -> Vec3<T> {
+        Vec3::splat(T::one())
+    }
+
+    /// The unit vector along `x`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::unit_x().x == 1.0);
+    /// ```
+    pub fn unit_x() -> Vec3<T> {
+        Vec3 { x: T::one(), y: T::zero(), z: T::zero() }
+    }
+
+    /// The unit vector along `y`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::unit_y().y == 1.0);
+    /// ```
+    pub fn unit_y() -> Vec3<T> {
+        Vec3 { x: T::zero(), y: T::one(), z: T::zero() }
+    }
+
+    /// The unit vector along `z`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::unit_z().z == 1.0);
+    /// ```
+    pub fn unit_z() -> Vec3<T> {
+        Vec3 { x: T::zero(), y: T::zero(), z: T::one() }
+    }
+
+    /// From `[x, y, z]`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::from_array([1.0, 2.0, 3.0]) == Vec3::new(1.0, 2.0, 3.0));
+    /// ```
+    pub const fn from_array(a: [T; 3]) -> Vec3<T> {
+        Vec3 { x: a[0], y: a[1], z: a[2] }
+    }
+
+    /// `[x, y, z]`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).to_array() == [1.0, 2.0, 3.0]);
+    /// ```
+    pub const fn to_array(self) -> [T; 3] {
+        [self.x, self.y, self.z]
+    }
+
+    /// The dot product.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).dot(Vec3::new(4.0, 5.0, 6.0)) == 32.0);
+    /// ```
+    pub fn dot(self, o: Vec3<T>) -> T {
+        self.x * o.x + self.y * o.y + self.z * o.z
+    }
+
+    /// `self.dot(self)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).length_squared() == Vec3::new(1.0, 2.0, 3.0).dot(Vec3::new(1.0, 2.0, 3.0)));
+    /// ```
+    pub fn length_squared(self) -> T {
+        self.dot(self)
+    }
+
+    /// The squared distance to `o`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::zero().distance_squared(Vec3::splat(1.0)) == 3.0);
+    /// ```
+    pub fn distance_squared(self, o: Vec3<T>) -> T {
+        (self - o).length_squared()
+    }
+
+    /// The smaller of each pair of components.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).min(Vec3::splat(1.5)).z == 1.5);
+    /// ```
+    pub fn min(self, o: Vec3<T>) -> Vec3<T> {
+        Vec3 { x: if o.x < self.x { o.x } else { self.x }, y: if o.y < self.y { o.y } else { self.y }, z: if o.z < self.z { o.z } else { self.z } }
+    }
+
+    /// The larger of each pair of components.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).max(Vec3::splat(1.5)).x == 1.5);
+    /// ```
+    pub fn max(self, o: Vec3<T>) -> Vec3<T> {
+        Vec3 { x: if o.x > self.x { o.x } else { self.x }, y: if o.y > self.y { o.y } else { self.y }, z: if o.z > self.z { o.z } else { self.z } }
+    }
+
+    /// Each component limited to `lo..=hi`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).clamp(Vec3::splat(1.5), Vec3::splat(1.5)) == Vec3::splat(1.5));
+    /// ```
+    pub fn clamp(self, lo: Vec3<T>, hi: Vec3<T>) -> Vec3<T> {
+        self.max(lo).min(hi)
+    }
+
+    /// The smallest component.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).min_element() == 1.0);
+    /// ```
+    pub fn min_element(self) -> T {
+        let m = self.x;
+        if self.y < m { m = self.y; }
+        if self.z < m { m = self.z; }
+        m
+    }
+
+    /// The largest component.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).max_element() == 3.0);
+    /// ```
+    pub fn max_element(self) -> T {
+        let m = self.x;
+        if self.y > m { m = self.y; }
+        if self.z > m { m = self.z; }
+        m
+    }
+
+    /// The sum of the components.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).element_sum() == 6.0);
+    /// ```
+    pub fn element_sum(self) -> T {
+        self.x + self.y + self.z
+    }
+
+    /// The product of the components.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).element_product() == 6.0);
+    /// ```
+    pub fn element_product(self) -> T {
+        self.x * self.y * self.z
+    }
+
+    /// Each component through `f`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).map(|c: f64| -> f64 { c * 2.0 }) == Vec3::new(1.0, 2.0, 3.0) * 2.0);
+    /// ```
+    pub fn map<U>(self, f: fn(T) -> U) -> Vec3<U> {
+        Vec3 { x: f(self.x), y: f(self.y), z: f(self.z) }
+    }
+
+    /// `(x, y)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).xy().x == 1.0);
+    /// ```
+    pub const fn xy(self) -> Vec2<T> {
+        Vec2 { x: self.x, y: self.y }
+    }
+
+    /// `(x, z)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).xz().x == 1.0);
+    /// ```
+    pub const fn xz(self) -> Vec2<T> {
+        Vec2 { x: self.x, y: self.z }
+    }
+
+    /// `(y, z)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).yz().x == 2.0);
+    /// ```
+    pub const fn yz(self) -> Vec2<T> {
+        Vec2 { x: self.y, y: self.z }
+    }
+
+    /// `(y, x)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).yx().x == 2.0);
+    /// ```
+    pub const fn yx(self) -> Vec2<T> {
+        Vec2 { x: self.y, y: self.x }
+    }
+
+    /// `(z, x)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).zx().x == 3.0);
+    /// ```
+    pub const fn zx(self) -> Vec2<T> {
+        Vec2 { x: self.z, y: self.x }
+    }
+
+    /// `(z, y)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).zy().x == 3.0);
+    /// ```
+    pub const fn zy(self) -> Vec2<T> {
+        Vec2 { x: self.z, y: self.y }
+    }
+
+    /// `(z, y, x)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).zyx().x == 3.0);
+    /// ```
+    pub const fn zyx(self) -> Vec3<T> {
+        Vec3 { x: self.z, y: self.y, z: self.x }
+    }
+
+    /// `(x, z, y)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).xzy().x == 1.0);
+    /// ```
+    pub const fn xzy(self) -> Vec3<T> {
+        Vec3 { x: self.x, y: self.z, z: self.y }
+    }
+
+    /// `(y, x, z)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).yxz().x == 2.0);
+    /// ```
+    pub const fn yxz(self) -> Vec3<T> {
+        Vec3 { x: self.y, y: self.x, z: self.z }
+    }
+
+    /// `(y, z, x)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).yzx().x == 2.0);
+    /// ```
+    pub const fn yzx(self) -> Vec3<T> {
+        Vec3 { x: self.y, y: self.z, z: self.x }
+    }
+
+    /// `(z, x, y)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).zxy().x == 3.0);
+    /// ```
+    pub const fn zxy(self) -> Vec3<T> {
+        Vec3 { x: self.z, y: self.x, z: self.y }
+    }
+
+    /// `(x, y, z, w)`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).extend(1.0).w == 1.0);
+    /// ```
+    pub const fn extend(self, w: T) -> Vec4<T> {
+        Vec4 { x: self.x, y: self.y, z: self.z, w: w }
+    }
+}
+
+impl<T: Real> Vec3<T> {
+    /// The length.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(3.0, 4.0, 0.0).length() == 5.0);
+    /// ```
+    pub fn length(self) -> T {
+        self.length_squared().sqrt()
+    }
+
+    /// `1 / length`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(0.0, 4.0, 0.0).length_recip() == 0.25);
+    /// ```
+    pub fn length_recip(self) -> T {
+        T::one() / self.length()
+    }
+
+    /// The distance to `o`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::zero().distance(Vec3::new(3.0, 4.0, 0.0)) == 5.0);
+    /// ```
+    pub fn distance(self, o: Vec3<T>) -> T {
+        (self - o).length()
+    }
+
+    /// The vector of length 1 in the same direction. A zero vector gives
+    /// NaN components; `try_normalize` or `normalize_or_zero` handle it.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(0.0, 2.0, 0.0).normalize() == Vec3::new(0.0, 1.0, 0.0));
+    /// ```
+    pub fn normalize(self) -> Vec3<T> {
+        self * self.length_recip()
+    }
+
+    /// The unit vector, or `none` for a zero, tiny or non-finite one.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::zero().try_normalize() == none);
+    /// ```
+    pub fn try_normalize(self) -> Vec3<T> | none {
+        let r = self.length_recip();
+        if r.is_finite() && r > T::zero() { self * r } else { none }
+    }
+
+    /// The unit vector, or zero where `try_normalize` gives `none`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::zero().normalize_or_zero() == Vec3::zero());
+    /// ```
+    pub fn normalize_or_zero(self) -> Vec3<T> {
+        match self.try_normalize() {
+            v: Vec3<T> => v,
+            none => Vec3::zero(),
+        }
+    }
+
+    /// Whether the length is 1, within `1e-4` of the squared length.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::unit_x().is_normalized());
+    /// ```
+    pub fn is_normalized(self) -> bool {
+        (self.length_squared() - T::one()).abs() <= T::from_f64(1e-4)
+    }
+
+    /// `self + (o - self) * t`: `t = 0` gives `self`, `t = 1` gives `o`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::zero().lerp(Vec3::splat(2.0), 0.5) == Vec3::one());
+    /// ```
+    pub fn lerp(self, o: Vec3<T>, t: T) -> Vec3<T> {
+        self + (o - self) * t
+    }
+
+    /// The midpoint of `self` and `o`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::zero().midpoint(Vec3::splat(2.0)) == Vec3::one());
+    /// ```
+    pub fn midpoint(self, o: Vec3<T>) -> Vec3<T> {
+        (self + o) * T::from_f64(0.5)
+    }
+
+    /// Whether every component is within `eps` of `o`'s.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::new(1.0, 2.0, 3.0).approx_eq(Vec3::new(1.0, 2.0, 3.0) + Vec3::splat(1e-7), 1e-6));
+    /// ```
+    pub fn approx_eq(self, o: Vec3<T>, eps: T) -> bool {
+        (self.x - o.x).abs() <= eps && (self.y - o.y).abs() <= eps && (self.z - o.z).abs() <= eps
+    }
+
+    /// Each component's absolute value.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert((-Vec3::<f32>::one()).abs() == Vec3::one());
+    /// ```
+    pub fn abs(self) -> Vec3<T> {
+        Vec3 { x: self.x.abs(), y: self.y.abs(), z: self.z.abs() }
+    }
+
+    /// Each component rounded down.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::splat(1.5).floor() == Vec3::one());
+    /// ```
+    pub fn floor(self) -> Vec3<T> {
+        Vec3 { x: self.x.floor(), y: self.y.floor(), z: self.z.floor() }
+    }
+
+    /// Each component rounded up.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::splat(0.5).ceil() == Vec3::one());
+    /// ```
+    pub fn ceil(self) -> Vec3<T> {
+        Vec3 { x: self.x.ceil(), y: self.y.ceil(), z: self.z.ceil() }
+    }
+
+    /// Each component rounded to the nearest integer, half away from zero.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::splat(0.5).round() == Vec3::one());
+    /// ```
+    pub fn round(self) -> Vec3<T> {
+        Vec3 { x: self.x.round(), y: self.y.round(), z: self.z.round() }
+    }
+
+    /// `1 / c` of each component.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::splat(4.0).recip() == Vec3::splat(0.25));
+    /// ```
+    pub fn recip(self) -> Vec3<T> {
+        Vec3 { x: T::one() / self.x, y: T::one() / self.y, z: T::one() / self.z }
+    }
+
+    /// Whether no component is NaN or infinite.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(!Vec3::splat(1.0 / 0.0).is_finite());
+    /// ```
+    pub fn is_finite(self) -> bool {
+        self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
+    }
+
+    /// The part of `self` along `onto` (which need not be unit length).
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::splat(2.0).project_onto(Vec3::unit_x()) == Vec3::unit_x() * 2.0);
+    /// ```
+    pub fn project_onto(self, onto: Vec3<T>) -> Vec3<T> {
+        onto * (self.dot(onto) / onto.length_squared())
+    }
+
+    /// The part of `self` at right angles to `from`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::splat(2.0).reject_from(Vec3::unit_x()).x == 0.0);
+    /// ```
+    pub fn reject_from(self, from: Vec3<T>) -> Vec3<T> {
+        self - self.project_onto(from)
+    }
+
+    /// `self` mirrored by the plane through 0 with unit normal `n`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::splat(1.0).reflect(Vec3::unit_x()).x == -1.0);
+    /// ```
+    pub fn reflect(self, n: Vec3<T>) -> Vec3<T> {
+        self - n * (T::from_f64(2.0) * self.dot(n))
+    }
+
+    /// The angle to `o` in radians, in `0..=pi`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert((Vec3::<f64>::unit_x().angle_between(Vec3::unit_y()) - f64::PI / 2.0).abs() < 1e-12);
+    /// ```
+    pub fn angle_between(self, o: Vec3<T>) -> T {
+        let c = self.dot(o) / (self.length_squared() * o.length_squared()).sqrt();
+        c.max(-T::one()).min(T::one()).acos()
+    }
+
+    /// The cross product, right-handed: `x.cross(y) == z`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// assert(Vec3::<f32>::unit_x().cross(Vec3::unit_y()) == Vec3::unit_z());
+    /// ```
+    pub fn cross(self, o: Vec3<T>) -> Vec3<T> {
+        Vec3 {
+            x: self.y * o.z - self.z * o.y,
+            y: self.z * o.x - self.x * o.z,
+            z: self.x * o.y - self.y * o.x,
+        }
+    }
+
+    /// A unit vector at right angles to the unit vector `self`.
+    ///
+    /// ```nabi
+    /// use spatial::Vec3;
+    ///
+    /// let v = Vec3::<f32>::unit_z();
+    /// assert(v.any_orthonormal().dot(v) == 0.0);
+    /// ```
+    pub fn any_orthonormal(self) -> Vec3<T> {
+        // Frisvad / Duff et al.: branch on the sign of z, no normalize.
+        let s = if self.z >= T::zero() { T::one() } else { -T::one() };
+        let a = -T::one() / (s + self.z);
+        let b = self.x * self.y * a;
+        Vec3 { x: T::one() + s * self.x * self.x * a, y: s * b, z: -s * self.x }
+    }
+}
+
+#[impl_macro(vec3_consts)] @macro {
+    (@rep[sep = ","] { @t: ty }) => {
+        @for @t {
+            impl Vec3<@t> {
+                /// All zero.
+                ///
+                /// ```nabi
+                /// use spatial::Vec3;
+                ///
+                /// assert(Vec3::ZERO == Vec3::zero());
+                /// ```
+                pub const ZERO: Vec3<@t> = Vec3 { x: 0 as @t, y: 0 as @t, z: 0 as @t };
+                /// All one.
+                ///
+                /// ```nabi
+                /// use spatial::Vec3;
+                ///
+                /// assert(Vec3::ONE == Vec3::one());
+                /// ```
+                pub const ONE: Vec3<@t> = Vec3 { x: 1 as @t, y: 1 as @t, z: 1 as @t };
+                /// The unit vector along `x`.
+                ///
+                /// ```nabi
+                /// use spatial::Vec3;
+                ///
+                /// assert(Vec3::X == Vec3::unit_x());
+                /// ```
+                pub const X: Vec3<@t> = Vec3 { x: 1 as @t, y: 0 as @t, z: 0 as @t };
+                /// The unit vector along `y`.
+                ///
+                /// ```nabi
+                /// use spatial::Vec3;
+                ///
+                /// assert(Vec3::Y == Vec3::unit_y());
+                /// ```
+                pub const Y: Vec3<@t> = Vec3 { x: 0 as @t, y: 1 as @t, z: 0 as @t };
+                /// The unit vector along `z`.
+                ///
+                /// ```nabi
+                /// use spatial::Vec3;
+                ///
+                /// assert(Vec3::Z == Vec3::unit_z());
+                /// ```
+                pub const Z: Vec3<@t> = Vec3 { x: 0 as @t, y: 0 as @t, z: 1 as @t };
+            }
+        }
+    }
+}
+
+vec3_consts!(f32, f64, i32, u32);
+
+// Component-wise; a scalar on the right applies to every component.
+
+impl<T: Scalar> Add for Vec3<T> {
+    type Output = Vec3<T>;
+    fn add(self, o: Vec3<T>) -> Vec3<T> { Vec3 { x: self.x + o.x, y: self.y + o.y, z: self.z + o.z } }
+}
+
+impl<T: Scalar> Add<T> for Vec3<T> {
+    type Output = Vec3<T>;
+    fn add(self, s: T) -> Vec3<T> { Vec3 { x: self.x + s, y: self.y + s, z: self.z + s } }
+}
+
+impl<T: Scalar> AddAssign for Vec3<T> {
+    fn add_assign(ref self, o: Vec3<T>) { self = self + o; }
+}
+
+impl<T: Scalar> AddAssign<T> for Vec3<T> {
+    fn add_assign(ref self, s: T) { self = self + s; }
+}
+
+impl<T: Scalar> Sub for Vec3<T> {
+    type Output = Vec3<T>;
+    fn sub(self, o: Vec3<T>) -> Vec3<T> { Vec3 { x: self.x - o.x, y: self.y - o.y, z: self.z - o.z } }
+}
+
+impl<T: Scalar> Sub<T> for Vec3<T> {
+    type Output = Vec3<T>;
+    fn sub(self, s: T) -> Vec3<T> { Vec3 { x: self.x - s, y: self.y - s, z: self.z - s } }
+}
+
+impl<T: Scalar> SubAssign for Vec3<T> {
+    fn sub_assign(ref self, o: Vec3<T>) { self = self - o; }
+}
+
+impl<T: Scalar> SubAssign<T> for Vec3<T> {
+    fn sub_assign(ref self, s: T) { self = self - s; }
+}
+
+impl<T: Scalar> Mul for Vec3<T> {
+    type Output = Vec3<T>;
+    fn mul(self, o: Vec3<T>) -> Vec3<T> { Vec3 { x: self.x * o.x, y: self.y * o.y, z: self.z * o.z } }
+}
+
+impl<T: Scalar> Mul<T> for Vec3<T> {
+    type Output = Vec3<T>;
+    fn mul(self, s: T) -> Vec3<T> { Vec3 { x: self.x * s, y: self.y * s, z: self.z * s } }
+}
+
+impl<T: Scalar> MulAssign for Vec3<T> {
+    fn mul_assign(ref self, o: Vec3<T>) { self = self * o; }
+}
+
+impl<T: Scalar> MulAssign<T> for Vec3<T> {
+    fn mul_assign(ref self, s: T) { self = self * s; }
+}
+
+impl<T: Scalar> Div for Vec3<T> {
+    type Output = Vec3<T>;
+    fn div(self, o: Vec3<T>) -> Vec3<T> { Vec3 { x: self.x / o.x, y: self.y / o.y, z: self.z / o.z } }
+}
+
+impl<T: Scalar> Div<T> for Vec3<T> {
+    type Output = Vec3<T>;
+    fn div(self, s: T) -> Vec3<T> { Vec3 { x: self.x / s, y: self.y / s, z: self.z / s } }
+}
+
+impl<T: Scalar> DivAssign for Vec3<T> {
+    fn div_assign(ref self, o: Vec3<T>) { self = self / o; }
+}
+
+impl<T: Scalar> DivAssign<T> for Vec3<T> {
+    fn div_assign(ref self, s: T) { self = self / s; }
+}
+
+impl<T: Scalar + Neg<Output = T>> Neg for Vec3<T> {
+    type Output = Vec3<T>;
+    fn neg(self) -> Vec3<T> { Vec3 { x: -self.x, y: -self.y, z: -self.z } }
+}
+
+impl<T: Scalar> Index<usize> for Vec3<T> {
+    type Output = T;
+    /// Component `i`: 0 is `x`; past 2 panics.
+    #[track_caller]
+    fn index(self, i: usize) -> T {
+        match i {
+            0 => self.x,
+            1 => self.y,
+            2 => self.z,
+            _ => panic(f"Vec3 index {i} is out of range 0..3"),
+        }
+    }
+}
+
+/// `(x, y, z)`, each component as its `Display`.
+impl<T: Scalar> Display for Vec3<T> {
+    fn fmt(self, ref f: Formatter) throws (FmtError) {
+        try f.write_str("(");
+        try Display::fmt(self.x, ref f);
+        try f.write_str(", ");
+        try Display::fmt(self.y, ref f);
+        try f.write_str(", ");
+        try Display::fmt(self.z, ref f);
+        try f.write_str(")")
+    }
+}
+
+#[impl_macro(vec3_scalar_left)] @macro {
+    (@rep[sep = ","] { @t: ty }) => {
+        @for @t {
+            impl Mul<Vec3<@t>> for @t {
+                type Output = Vec3<@t>;
+                fn mul(self, v: Vec3<@t>) -> Vec3<@t> { v * self }
+            }
+        }
+    }
+}
+
+vec3_scalar_left!(f32, f64, i32, u32);

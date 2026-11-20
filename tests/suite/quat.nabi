@@ -1,0 +1,73 @@
+// Quaternions on known rotations.
+
+use pkg::tests::suite::{close, expect};
+use pkg::{DMat3, DQuat, DVec3, Quat, Vec3};
+
+#[test]
+fn axis_rotations() {
+    let h = f64::PI / 2.0;
+    expect((DQuat::from_rotation_x(h) * DVec3::Y).approx_eq(DVec3::Z, 1e-12), "x: y to z");
+    expect((DQuat::from_rotation_y(h) * DVec3::Z).approx_eq(DVec3::X, 1e-12), "y: z to x");
+    expect((DQuat::from_rotation_z(h) * DVec3::X).approx_eq(DVec3::Y, 1e-12), "z: x to y");
+    expect(DQuat::from_axis_angle(DVec3::Z, h).approx_eq(DQuat::from_rotation_z(h), 1e-15), "axis angle");
+}
+
+#[test]
+fn composition() {
+    // b first, then a.
+    let a = DQuat::from_rotation_z(f64::PI / 2.0);
+    let b = DQuat::from_rotation_x(f64::PI / 2.0);
+    let v = DVec3::Y;
+    expect(((a * b) * v).approx_eq(a * (b * v), 1e-12), "a * b applies b first");
+    // y about x to z, then z about z stays z.
+    expect(((a * b) * v).approx_eq(DVec3::Z, 1e-12), "known result");
+    let q = a;
+    q *= b;
+    expect(q == a * b, "mul_assign");
+}
+
+#[test]
+fn inverse_and_norms() {
+    let q = DQuat::from_axis_angle(DVec3::new(1.0, 2.0, 2.0).normalize(), 1.2);
+    expect((q * q.inverse()).approx_eq(DQuat::IDENTITY, 1e-12), "inverse");
+    expect(q.conjugate().approx_eq(q.inverse(), 1e-12), "conjugate is inverse");
+    close(q.length(), 1.0, 1e-12, "unit");
+    expect((q * 3.0).normalize().approx_eq(q, 1e-12), "normalize");
+    let (axis, angle) = q.to_axis_angle();
+    expect(axis.approx_eq(DVec3::new(1.0, 2.0, 2.0) / 3.0, 1e-12), "axis");
+    close(angle, 1.2, 1e-12, "angle");
+    close(q.angle_between(DQuat::IDENTITY), 1.2, 1e-12, "angle_between");
+    close((-q).angle_between(q), 0.0, 1e-6, "q and -q are one rotation");
+}
+
+#[test]
+fn interpolation() {
+    let a = DQuat::from_rotation_y(0.2);
+    let b = DQuat::from_rotation_y(1.4);
+    expect(a.slerp(b, 0.0).approx_eq(a, 1e-12) && a.slerp(b, 1.0).approx_eq(b, 1e-12), "slerp ends");
+    expect(a.slerp(b, 0.5).approx_eq(DQuat::from_rotation_y(0.8), 1e-12), "slerp middle");
+    expect(a.slerp(-b, 0.5).approx_eq(DQuat::from_rotation_y(0.8), 1e-12), "slerp short way");
+    expect(a.nlerp(b, 0.5).approx_eq(DQuat::from_rotation_y(0.8), 1e-12), "nlerp middle (symmetric)");
+    expect(a.slerp(a, 0.3).approx_eq(a, 1e-12), "slerp equal");
+}
+
+#[test]
+fn arcs_and_matrices() {
+    let f = DVec3::new(1.0, 1.0, 0.0).normalize();
+    let t = DVec3::new(0.0, 0.3, 1.0).normalize();
+    expect((DQuat::from_rotation_arc(f, t) * f).approx_eq(t, 1e-12), "arc");
+    expect((DQuat::from_rotation_arc(f, -f) * f).approx_eq(-f, 1e-12), "opposite arc");
+    expect(DQuat::from_rotation_arc(f, f).approx_eq(DQuat::IDENTITY, 1e-12), "same arc");
+    // Each branch of Shepperd's method.
+    for q in [DQuat::from_rotation_x(0.3), DQuat::from_rotation_x(3.0), DQuat::from_rotation_y(3.0), DQuat::from_rotation_z(3.0)] {
+        let back = DQuat::from_mat3(DMat3::from_quat(q));
+        expect(back.approx_eq(q, 1e-12) || back.approx_eq(-q, 1e-12), f"from_mat3 of {q}");
+    }
+}
+
+#[test]
+fn single_precision() {
+    let q = Quat::from_rotation_z(f32::PI / 2.0);
+    expect((q * Vec3::X).approx_eq(Vec3::Y, 1e-6), "f32 rotation");
+    expect(Quat::IDENTITY * Vec3::ONE == Vec3::ONE, "identity");
+}

@@ -1,0 +1,35 @@
+//! Fixed-size math for games and graphics: vectors, quaternions,
+//! column-major matrices, affine transforms and simple shapes.
+//!
+//! Every type is generic over its component: `Vec3<T>`, `Quat<T>`,
+//! `Mat4<T>`, with `T = f32` when left out, so `Vec3` is `Vec3<f32>`.
+//! `DVec3`, `DQuat`, `DMat4`, ... name the `f64` forms; `IVec3` and
+//! `UVec3` the `i32` and `u32` vectors. Every type is `#[repr(C)]` with
+//! its components in order, so it goes into a GPU buffer or across the C
+//! ABI as it is.
+//!
+//! Conventions: column vectors (`m * v`), matrices stored column by
+//! column as GPUs read them, right-handed unless a name says `_lh`,
+//! angles in radians. Projections come in four forms each: `_rh` / `_lh`
+//! for the handedness of view space, and depth `0..1` (Metal, Direct3D,
+//! Vulkan, WebGPU) or, with `_gl`, `-1..1` (OpenGL).
+
+pub mod shape;
+
+mod affine;
+mod euler;
+mod mat;
+mod quat;
+mod scalar;
+mod transform;
+mod vec;
+
+pub use affine::{Affine2, Affine3, DAffine2, DAffine3};
+pub use euler::EulerOrder;
+pub use mat::{DMat2, DMat3, DMat4, Mat2, Mat3, Mat4};
+pub use quat::{DQuat, Quat};
+pub use scalar::{Real, Scalar};
+pub use shape::{Aabb, Plane, Ray, Sphere};
+pub use transform::{DTransform, Transform};
+pub use vec::{DVec2, DVec3, DVec3A, DVec4, IVec2, IVec3, IVec4, UVec2, UVec3, UVec4, Vec2, Vec3, Vec3A, Vec4};
+pub use vec::{dvec2, dvec3, dvec4, ivec2, ivec3, ivec4, uvec2, uvec3, uvec4, vec2, vec3, vec4};

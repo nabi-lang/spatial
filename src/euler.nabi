@@ -1,0 +1,83 @@
+//! Euler angles: which axes, in which order.
+
+use pkg::{Mat3, Quat, Real, Vec3};
+use core::reflect::Inspect;
+
+/// The axes of three Euler angles `a`, `b`, `c`, first to last. With
+/// `XYZ` the rotation is `R_x(a) * R_y(b) * R_z(c)`: on a column vector
+/// `c` about z applies first, then `b` about y, then `a` about x. Read
+/// as moving axes, it is `a` about x, then `b` about the turned y, then
+/// `c` about the twice-turned z (intrinsic X-Y'-Z'').
+///
+/// For a y-up, -z-forward camera or character, `YXZ` is yaw, pitch,
+/// roll; for z-up worlds (aircraft, robotics), `ZYX` is.
+///
+/// ```nabi
+/// use spatial::{DMat3, EulerOrder};
+///
+/// let m = DMat3::from_euler(EulerOrder::XYZ, 0.1, 0.2, 0.3);
+/// let want = DMat3::from_rotation_x(0.1) * DMat3::from_rotation_y(0.2) * DMat3::from_rotation_z(0.3);
+/// assert(m.approx_eq(want, 1e-12));
+/// ```
+#[derive(Clone, Copy, PartialEq, Debug, Inspect)]
+#[cfg_attr(feature = "nabion", derive(Nabion))]
+pub enum EulerOrder {
+    XYZ,
+    XZY,
+    YXZ,
+    YZX,
+    ZXY,
+    ZYX,
+}
+
+impl EulerOrder {
+    /// The axis indices (0 = x, 1 = y, 2 = z), first to last.
+    ///
+    /// ```nabi
+    /// assert(spatial::EulerOrder::YXZ.axes() == (1, 0, 2));
+    /// ```
+    pub fn axes(self) -> (usize, usize, usize) {
+        match self {
+            EulerOrder::XYZ => (0, 1, 2),
+            EulerOrder::XZY => (0, 2, 1),
+            EulerOrder::YXZ => (1, 0, 2),
+            EulerOrder::YZX => (1, 2, 0),
+            EulerOrder::ZXY => (2, 0, 1),
+            EulerOrder::ZYX => (2, 1, 0),
+        }
+    }
+}
+
+fn axis<T: Real>(i: usize) -> Vec3<T> {
+    match i {
+        0 => Vec3::unit_x(),
+        1 => Vec3::unit_y(),
+        _ => Vec3::unit_z(),
+    }
+}
+
+pub(pkg) fn axis_quat<T: Real>(i: usize, angle: T) -> Quat<T> { Quat::from_axis_angle(axis(i), angle) }
+
+pub(pkg) fn axis_mat<T: Real>(i: usize, angle: T) -> Mat3<T> { Mat3::from_axis_angle(axis(i), angle) }
+
+// Row r, column c.
+fn at<T: Real>(m: Mat3<T>, r: usize, c: usize) -> T { m.col(c)[r] }
+
+// M = R_i(a) R_j(b) R_k(c). M[i][k] is s * sin(b), s = +1 for a cyclic
+// order (XYZ, YZX, ZXY), -1 otherwise.
+pub(pkg) fn angles<T: Real>(m: Mat3<T>, order: EulerOrder) -> (T, T, T) {
+    let (i, j, k) = order.axes();
+    let s = if (j + 3 - i) % 3 == 1 { T::one() } else { -T::one() };
+    let sb = (s * at(m, i, k)).max(-T::one()).min(T::one());
+    let b = sb.asin();
+    if sb.abs() < T::from_f64(1.0 - 1e-6) {
+        let a = (-s * at(m, j, k)).atan2(at(m, k, k));
+        let c = (-s * at(m, i, j)).atan2(at(m, i, i));
+        (a, b, c)
+    } else {
+        // Gimbal lock: only a + c (or a - c) is known; put it all in a.
+        // With c = 0, column j of M is R_i(a) e_j.
+        let a = (s * at(m, k, j)).atan2(at(m, j, j));
+        (a, b, T::zero())
+    }
+}
