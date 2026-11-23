@@ -22,7 +22,7 @@ and `u32` vectors. For large n-dimensional arrays and factorizations, use
 nabi add spatial
 ```
 
-Needs Nabi 0.1 or later. Pure Nabi: every target works, wasm included.
+Needs Nabi 0.1.2 or later. Pure Nabi: every target works, wasm included.
 
 ## Usage
 
@@ -194,7 +194,7 @@ bench`, 4096 operations per iteration, `-O2`:
 
 ## Docs
 
-https://packages.nabi-lang.org/packages/spatial/latest/docs
+https://docs.nabi-lang.org/packages/spatial/latest
 
 ## License
 
